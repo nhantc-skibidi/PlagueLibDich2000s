@@ -1,0 +1,14 @@
+<Project>
+  <!--
+    MẪU cấu hình đường dẫn build — copy file này thành "Directory.Build.props.user"
+    (cùng thư mục) rồi sửa 2 đường dẫn dưới đây cho đúng máy của bạn.
+    File .user KHÔNG được commit (đã có trong .gitignore).
+
+    BepInExDir  = thư mục BepInEx của game (chứa core\0Harmony.dll, core\BepInEx.dll)
+    GameManagedDir = thư mục Managed của game (chứa Assembly-CSharp.dll, UnityEngine*.dll)
+  -->
+  <PropertyGroup>
+    <BepInExDir>D:\SteamLibrary\steamapps\common\PlagueInc\BepInEx</BepInExDir>
+    <GameManagedDir>D:\SteamLibrary\steamapps\common\PlagueInc\PlagueIncEvolved_Data\Managed</GameManagedDir>
+  </PropertyGroup>
+</Project>
