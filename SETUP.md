@@ -53,14 +53,6 @@ Nếu muốn build mà KHÔNG tự cài (ví dụ build trên máy CI không có
 dotnet build /p:SkipInstallToBepInEx=true
 ```
 
-## 4. Ảnh AboutMod.png
-
-`Resources/AboutMod.png` hiện đang là **file placeholder rỗng** trong bản này (file
-gốc bạn upload bị lỗi 0 byte). Thay file `PlagueLibDich2000s/Resources/AboutMod.png`
-bằng ảnh avatar thật của bạn (PNG, khuyên dùng vuông, dưới vài trăm KB) rồi build lại
-— ảnh sẽ được nhúng thẳng vào DLL (`EmbeddedResource`), không cần copy file .png riêng
-khi phát hành mod.
-
 ## Cấu trúc repo
 
 ```
