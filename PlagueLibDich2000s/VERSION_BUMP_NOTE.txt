@@ -1,0 +1,6 @@
+LANG-43 applied in local Main_LANG43.cs — if Main.cs not updated in this commit, replace PlagueLibDich2000s/Main.cs from release artifact.
+Changes:
+1. Do not clear LastLanguage on official switch
+2. ForceCustomLanguage skips only non-English official
+3. WaitForGameUi same gate
+4. Remove OptionsSelector Set DEBUG log
