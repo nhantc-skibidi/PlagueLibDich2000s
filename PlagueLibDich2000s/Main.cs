@@ -1,4 +1,4 @@
-﻿using BepInEx;
+using BepInEx;
 using BepInEx.Configuration;
 using HarmonyLib;
 using System;
@@ -1345,39 +1345,93 @@ public class PlagueVnMod : BaseUnityPlugin
                     // undo mọi fix của mod). Thay bằng KEY nguồn đã cache khi label còn
                     // nguyên vẹn. Vẫn capture key trước (nếu component còn lành).
                     CacheLabelSourceKey(lab, TryGetLabelRawKey(lab));
+
+                    // LANG-45c: key đã capture lúc lành (cache) — ưu tiên hơn orig hiện tại.
+                    string safeSrc = null;
+                    if (lab != null)
+                    {
+                        if (LabelSourceKeyCache.TryGetValue(lab, out string ck)
+                            && !string.IsNullOrEmpty(ck)
+                            && ConfigManager.IsFeKey(ck)
+                            && TryResolveOfficialLabelText(ck, out _))
+                            safeSrc = ck;
+                        else if (OriginalTextCache.TryGetValue(lab, out string ok)
+                            && !string.IsNullOrEmpty(ok)
+                            && ConfigManager.IsFeKey(ok)
+                            && TryResolveOfficialLabelText(ok, out _))
+                            safeSrc = ok;
+                    }
+                    // orig đã là FE_* SAI (poison) nhưng cache còn key đúng → khôi phục field.
+                    if (!string.IsNullOrEmpty(safeSrc)
+                        && ConfigManager.IsFeKey(orig)
+                        && !string.Equals(orig, safeSrc, StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (VerboseLogging != null && VerboseLogging.Value)
+                            Debug.Log("[Localizer][DEBUG-HEAL-RECOVER] lab="
+                                + (lab != null ? lab.gameObject.name : "null")
+                                + " poisonedOrig=" + orig + " → safeSrc=" + safeSrc);
+                        orig = safeSrc;
+                        if (fiOrig != null)
+                        {
+                            try { fiOrig.SetValue(a, safeSrc); } catch { }
+                        }
+                        if (lab != null) CacheLabelSourceKey(lab, safeSrc);
+                    }
+
                     bool origResolvable = TryResolveOfficialLabelText(orig, out _);
 
                     if (!origResolvable)
                     {
+                        // LANG-45: reverse-map value→key (AnyOfficialValueToKey) first-wins
+                        // toàn cục — "Simple"/"シンプル" map nhầm → nút Reset = "Đơn giản"
+                        // vĩnh viễn. Chỉ PERSIST khi healKey từ cache FE_* đã xác nhận.
                         string healKey = null;
+                        bool healKeySafe = false;
 
-                        if (lab != null
+                        if (!string.IsNullOrEmpty(safeSrc))
+                        {
+                            healKey = safeSrc;
+                            healKeySafe = true;
+                        }
+                        else if (lab != null
                             && LabelSourceKeyCache.TryGetValue(lab, out string cachedKey)
                             && !string.IsNullOrEmpty(cachedKey)
                             && TryResolveOfficialLabelText(cachedKey, out _))
                         {
                             healKey = cachedKey;
+                            healKeySafe = ConfigManager.IsFeKey(cachedKey);
                         }
                         else if (TryMapAnyOfficialValueToKey(orig, out string mapped)
                                  && !string.IsNullOrEmpty(mapped))
                         {
-                            healKey = mapped;
+                            healKey = mapped; // display-only
                         }
                         else if (lab != null && !string.IsNullOrEmpty(lab.text)
                                  && TryMapAnyOfficialValueToKey(lab.text, out string mapped2)
                                  && !string.IsNullOrEmpty(mapped2))
                         {
-                            healKey = mapped2;
+                            healKey = mapped2; // display-only
                         }
 
                         if (!string.IsNullOrEmpty(healKey))
                         {
+                            if (VerboseLogging != null && VerboseLogging.Value)
+                                Debug.Log("[Localizer][DEBUG-HEAL] lab="
+                                    + (lab != null ? lab.gameObject.name : "null")
+                                    + " orig=" + orig
+                                    + " text=" + (lab != null ? lab.text : "null")
+                                    + " → healKey=" + healKey
+                                    + " safe=" + healKeySafe);
+
                             orig = healKey;
-                            if (fiOrig != null)
+                            if (healKeySafe)
                             {
-                                try { fiOrig.SetValue(a, healKey); } catch { }
+                                if (fiOrig != null)
+                                {
+                                    try { fiOrig.SetValue(a, healKey); } catch { }
+                                }
+                                if (lab != null) CacheLabelSourceKey(lab, healKey);
                             }
-                            if (lab != null) CacheLabelSourceKey(lab, healKey);
                         }
                     }
 
@@ -2682,18 +2736,15 @@ public class PlagueVnMod : BaseUnityPlugin
         // Phase 3: Force reload ngôn ngữ từ config
         Logger.LogInfo("[v2.7] Gọi ForceCustomLanguage...");
         ForceCustomLanguage();
-        // LANG-30: không force nếu UI đã ở official
+
         string act = null;
         try { act = CLocalisationManager.ActiveLanguage; } catch { }
         if (!string.IsNullOrEmpty(act) && ConfigManager.IsOfficialLanguage(act))
         {
             Debug.Log("[v2.7] UI ready — ActiveLanguage official = " + act + " → không ForceCustomLanguage");
         }
-        else
-        {
-            Debug.Log("[v2.7] Gọi ForceCustomLanguage...");
-            ForceCustomLanguage();
-        }
+       
+
     }
 
     /// <summary>
@@ -2707,9 +2758,12 @@ public class PlagueVnMod : BaseUnityPlugin
             string active = null;
             try { active = CLocalisationManager.ActiveLanguage; } catch { }
 
-            if (!string.IsNullOrEmpty(active) && ConfigManager.IsOfficialLanguage(active))
+            // User đã chọn official khác English (Japanese, Russian...) → tôn trọng, cổ điển lol
+            if (!string.IsNullOrEmpty(active)
+                && ConfigManager.IsOfficialLanguage(active)
+                && !active.Equals(ConfigManager.ReferenceLanguage, StringComparison.OrdinalIgnoreCase))
             {
-                Debug.Log("[v2.7] Bỏ ForceCustomLanguage — ActiveLanguage official = " + active);
+                Debug.Log("[v2.7] Bỏ ForceCustomLanguage — user official = " + active);
                 return;
             }
 
@@ -2719,6 +2773,10 @@ public class PlagueVnMod : BaseUnityPlugin
                 Debug.Log("[v2.7] ForceCustomLanguage: LastLanguage trống/không custom — bỏ qua");
                 return;
             }
+
+            // English / empty + có LastLanguage custom → restore
+            if (string.Equals(active, last, StringComparison.OrdinalIgnoreCase))
+                return; // đã đúng
 
             Debug.Log("[v2.7] ForceCustomLanguage begin — LastLanguage=" + last);
             CLocalisationManager.ActiveLanguage = last;
@@ -4569,12 +4627,8 @@ public static class ActiveLanguage_Save_Patch
                 PlagueVnMod.CurrentCustomLanguage = null;
                 CMainAboutModSubScreen.LangFolder = null;
 
-                try
-                {
-                    if (PlagueVnMod.LastLanguage != null)
-                        PlagueVnMod.LastLanguage.Value = "";
-                }
-                catch { }
+                // LANG-46: KHÔNG xoá LastLanguage khi sang official — giữ custom lần cuối
+                // để ForceCustomLanguage restore được khi boot về English mặc định.
 
                 if (!wasCustom)
                 {
@@ -4696,8 +4750,6 @@ public static class OptionsSelector_Set_Localize_Patch
 {
     static void Postfix(OptionsSelector __instance, int i)
     {
-        Debug.Log("[Localizer][DEBUG] Set i=" + i + " enumName=" + __instance.enumName
-    + " optionEnum[i]=" + __instance.optionEnum[i] + " optionLoc[i]=" + __instance.optionLoc[i]);
         if (!PlagueVnMod.IsCustomLanguageActive()) return;
         if (__instance == null || __instance.optionLoc == null || __instance.optionCurrent == null)
             return;
