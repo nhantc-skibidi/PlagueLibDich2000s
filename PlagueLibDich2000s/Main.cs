@@ -2063,6 +2063,14 @@ public class PlagueVnMod : BaseUnityPlugin
     /// → fallback dữ liệu game), rồi reset currentLanguage = null để lần đổi ngôn
     /// ngữ kế tiếp component tự dịch lại. Gate rẻ (StartsWith FE_ từ config).
     /// </summary>
+    // FIX LANG-43 (source-identity poisoning): trước đây nhánh "else" tra thẳng
+    // TryResolveLabelText(trimmed, ...) trên `cur` = lab.text HIỆN TẠI — nếu label
+    // đã từng bị set/dịch trước đó, `cur` có thể là 1 giá trị PHỔ BIẾN (vd "Simple",
+    // "On"/"Off") va collision với EnglishTextDict/EnglishToCustomDict của MỘT
+    // setting khác (bug "Reset All Progress" → "Simple", "Single Player" nhảy value).
+    // Kiến trúc mới: SOURCE IDENTITY (đóng băng 1 lần, qua LabelSourceKeyCache /
+    // OriginalTextCache) → TRANSLATE → DISPLAY ONLY. lab.text KHÔNG BAO GIỜ được
+    // dùng làm nguồn tra cứu một khi source identity đã tồn tại cho label đó.
     public static void Autotranslate_OnEnable_Postfix(UILabelAutotranslate __instance)
     {
         try
@@ -2074,37 +2082,70 @@ public class PlagueVnMod : BaseUnityPlugin
 
             string cur = lab.text;
             if (string.IsNullOrEmpty(cur)) return;
-            string trimmed = cur.Trim();
 
-            string resolved;
+            // ===== SOURCE IDENTITY =====
+            string source;
+            bool isFeSource;
 
-            if (ConfigManager.IsFeKey(trimmed))
+            if (LabelSourceKeyCache.TryGetValue(lab, out string cachedKey) && !string.IsNullOrEmpty(cachedKey))
             {
-                // === Nhánh CŨ, giữ nguyên 100% ===
-                resolved = TryResolveLabelKeyText(lab);
-                if (string.IsNullOrEmpty(resolved)
-                    || string.Equals(resolved, cur, StringComparison.Ordinal))
-                {
-                    if (!TryResolveLabelText(trimmed, out string fb)
-                        || string.IsNullOrEmpty(fb)
-                        || string.Equals(fb, cur, StringComparison.Ordinal))
-                        return;
-                    resolved = fb;
-                }
+                // Ưu tiên tuyệt đối — LabelSourceKeyCache chỉ chứa key đã xác thực
+                // (CacheLabelSourceKey/TryGetLabelRawKey), đóng băng từ lần đầu.
+                source = cachedKey;
+                isFeSource = true;
+            }
+            else if (OriginalTextCache.TryGetValue(lab, out string cachedOrig) && !string.IsNullOrEmpty(cachedOrig))
+            {
+                // Text gốc English đã đóng băng từ lần RefreshAllLabels/OnEnable đầu tiên.
+                source = cachedOrig;
+                isFeSource = ConfigManager.IsFeKey(source);
             }
             else
             {
-                // === MỚI: bắt case "Master Volume" — text KHÔNG phải FE_* nhưng
-                // vẫn bị AutoTranslate() gốc của game (không patch được) stamp lại
-                // English mỗi lần OnEnable() chạy lại (tắt/bật lại panel). Chỉ can
-                // thiệp khi TryResolveLabelText phân giải được giá trị KHÁC hiện
-                // tại — không đụng label English hợp lệ/không có bản dịch.
-                if (!TryResolveLabelText(trimmed, out resolved)
-                    || string.IsNullOrEmpty(resolved)
-                    || string.Equals(resolved, cur, StringComparison.Ordinal))
+                // Chưa từng capture cho label này — ĐÂY LÀ LẦN DUY NHẤT được phép
+                // nhìn vào lab.text để suy ra nguồn. Ưu tiên đọc field component
+                // (TryGetLabelRawKey — không đọc lab.text) trước khi rơi về display
+                // text hiện tại. Sau bước này, kết quả bị khoá vĩnh viễn.
+                string trimmed = cur.Trim();
+                string rawKey = TryGetLabelRawKey(lab);
+                if (!string.IsNullOrEmpty(rawKey))
+                {
+                    source = rawKey;
+                    isFeSource = ConfigManager.IsFeKey(rawKey);
+                    CacheLabelSourceKey(lab, rawKey);
+                }
+                else
+                {
+                    source = ResolveSourceEnglish(trimmed);
+                    isFeSource = ConfigManager.IsFeKey(source);
+                    CacheOriginalTextIfAbsent(lab, source);
+                }
+            }
+
+            if (string.IsNullOrEmpty(source)) return;
+
+            // ===== TRANSLATE — luôn tra theo `source` đã đóng băng, KHÔNG BAO GIỜ theo `cur` =====
+            string resolved = null;
+            if (isFeSource)
+            {
+                string k1 = TryResolveLabelKeyText(lab);
+                if (!string.IsNullOrEmpty(k1) && !string.Equals(k1, cur, StringComparison.Ordinal))
+                    resolved = k1;
+                else if (TryGetTranslation(source, out string feT) && !string.IsNullOrEmpty(feT))
+                    resolved = feT;
+                else if (TryResolveLabelText(source, out string fb) && !string.IsNullOrEmpty(fb))
+                    resolved = fb;
+            }
+            else
+            {
+                if (!TryResolveLabelText(source, out resolved) || string.IsNullOrEmpty(resolved))
                     return;
             }
 
+            if (string.IsNullOrEmpty(resolved) || string.Equals(resolved, cur, StringComparison.Ordinal))
+                return;
+
+            // ===== DISPLAY ONLY =====
             lab.text = resolved;
             if (_fiAutoCurrentLanguage != null)
             {
