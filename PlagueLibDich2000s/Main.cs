@@ -105,6 +105,25 @@ public class PlagueVnMod : BaseUnityPlugin
     public static readonly System.Runtime.CompilerServices.ConditionalWeakTable<UILabel, string> OriginalTextCache =
         new System.Runtime.CompilerServices.ConditionalWeakTable<UILabel, string>();
 
+    // ===== [TRACE] TẠM — chẩn đoán feedback loop RefreshAllLabels, XOÁ sau khi xác định root cause =====
+    // Chỉ trace các label nghi vấn (theo text hiện tại hoặc tên GameObject chứa 1
+    // trong các từ khoá) để không spam log / không tốn hiệu năng trên 3000+ label.
+    public static readonly HashSet<string> TraceWatchList =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "Simple", "Đơn giản", "Single Player", "1 Người", "Chơi Đơn",
+            "Reset All Progress", "Tiến trình", "Progress"
+        };
+    static readonly string[] TraceWatchNameParts = { "Reset", "Single", "Progress" };
+    static bool ContainsAnyWatchName(string goName)
+    {
+        if (string.IsNullOrEmpty(goName)) return false;
+        for (int i = 0; i < TraceWatchNameParts.Length; i++)
+            if (goName.IndexOf(TraceWatchNameParts[i], StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+        return false;
+    }
+
     // ===================== FIX LANG-40/41/42 (đổi ngôn ngữ khi đang chơi bị lộn xộn) =====================
     // 4 nguyên nhân gốc (xác minh qua decompile UILabelAutotranslate / CMainOptionsSubScreen.LanguageChange /
     // CLocalisationManager.GetTextInternal + log + video):
@@ -2083,6 +2102,11 @@ public class PlagueVnMod : BaseUnityPlugin
             string cur = lab.text;
             if (string.IsNullOrEmpty(cur)) return;
 
+            bool _traceWatch = TraceWatchList.Count > 0 &&
+                (TraceWatchList.Contains(cur) ||
+                 (lab.gameObject != null && ContainsAnyWatchName(lab.gameObject.name)));
+            string _identitySource = null; // "cache:key" / "cache:orig" / "first:rawkey" / "first:display"
+
             // ===== SOURCE IDENTITY =====
             string source;
             bool isFeSource;
@@ -2093,12 +2117,14 @@ public class PlagueVnMod : BaseUnityPlugin
                 // (CacheLabelSourceKey/TryGetLabelRawKey), đóng băng từ lần đầu.
                 source = cachedKey;
                 isFeSource = true;
+                _identitySource = "cache:LabelSourceKeyCache";
             }
             else if (OriginalTextCache.TryGetValue(lab, out string cachedOrig) && !string.IsNullOrEmpty(cachedOrig))
             {
                 // Text gốc English đã đóng băng từ lần RefreshAllLabels/OnEnable đầu tiên.
                 source = cachedOrig;
                 isFeSource = ConfigManager.IsFeKey(source);
+                _identitySource = "cache:OriginalTextCache";
             }
             else
             {
@@ -2113,33 +2139,59 @@ public class PlagueVnMod : BaseUnityPlugin
                     source = rawKey;
                     isFeSource = ConfigManager.IsFeKey(rawKey);
                     CacheLabelSourceKey(lab, rawKey);
+                    _identitySource = "FIRST-SIGHT:TryGetLabelRawKey";
                 }
                 else
                 {
                     source = ResolveSourceEnglish(trimmed);
                     isFeSource = ConfigManager.IsFeKey(source);
                     CacheOriginalTextIfAbsent(lab, source);
+                    _identitySource = "FIRST-SIGHT:display-text(\"" + trimmed + "\")";
                 }
             }
 
-            if (string.IsNullOrEmpty(source)) return;
+            if (string.IsNullOrEmpty(source))
+            {
+                if (_traceWatch)
+                    Debug.Log("[TRACE] OnEnable " + (lab.gameObject != null ? lab.gameObject.name : "?")
+                        + " — source rỗng, bỏ qua. identitySource=" + _identitySource);
+                return;
+            }
 
             // ===== TRANSLATE — luôn tra theo `source` đã đóng băng, KHÔNG BAO GIỜ theo `cur` =====
             string resolved = null;
+            string _resolver = "none";
             if (isFeSource)
             {
                 string k1 = TryResolveLabelKeyText(lab);
                 if (!string.IsNullOrEmpty(k1) && !string.Equals(k1, cur, StringComparison.Ordinal))
-                    resolved = k1;
+                { resolved = k1; _resolver = "AutotranslateKey"; }
                 else if (TryGetTranslation(source, out string feT) && !string.IsNullOrEmpty(feT))
-                    resolved = feT;
+                { resolved = feT; _resolver = "TryGetTranslation(FE)"; }
                 else if (TryResolveLabelText(source, out string fb) && !string.IsNullOrEmpty(fb))
-                    resolved = fb;
+                { resolved = fb; _resolver = "TryResolveLabelText(FE-fallback)"; }
             }
             else
             {
-                if (!TryResolveLabelText(source, out resolved) || string.IsNullOrEmpty(resolved))
-                    return;
+                if (TryResolveLabelText(source, out resolved) && !string.IsNullOrEmpty(resolved))
+                    _resolver = "TryResolveLabelText(non-FE, REVERSE-capable)";
+            }
+
+            if (_traceWatch)
+            {
+                Debug.Log("[TRACE] OnEnable " + (lab.gameObject != null ? lab.gameObject.name : "?")
+                    + "\n  text.before = \"" + cur + "\""
+                    + "\n  identitySource = " + _identitySource
+                    + "\n  sourceKey/sourceEnglish = \"" + source + "\" (isFeSource=" + isFeSource + ")"
+                    + "\n  resolver = " + _resolver
+                    + "\n  translated = " + (resolved != null ? "\"" + resolved + "\"" : "(null)")
+                    + "\n  text.after = " + ((!string.IsNullOrEmpty(resolved) && !string.Equals(resolved, cur, StringComparison.Ordinal)) ? "\"" + resolved + "\"" : "\"" + cur + "\" (unchanged)"));
+
+                if (_identitySource != null && _identitySource.StartsWith("FIRST-SIGHT:display-text", StringComparison.Ordinal))
+                    Debug.Log("[TRACE] REVERSE FALLBACK"
+                        + "\n  input = \"" + cur + "\""
+                        + "\n  ValueToEnglish => " + (TryMapValueToEnglish(cur, out string _v2e) ? "\"" + _v2e + "\"" : "(miss)")
+                        + "\n  (lần đầu thấy label — không có identity trước đó, capture từ display text là hợp lệ theo thiết kế, nhưng CẦN xem 'sourceEnglish' ở trên có đúng bản chất setting này hay không)");
             }
 
             if (string.IsNullOrEmpty(resolved) || string.Equals(resolved, cur, StringComparison.Ordinal))
@@ -2784,7 +2836,7 @@ public class PlagueVnMod : BaseUnityPlugin
         {
             Debug.Log("[v2.7] UI ready — ActiveLanguage official = " + act + " → không ForceCustomLanguage");
         }
-       
+
 
     }
 
@@ -3268,6 +3320,14 @@ public class PlagueVnMod : BaseUnityPlugin
                 try { if (!FontRestore.IsLiveSceneObject(lab)) continue; }
                 catch { }
 
+                // ===== [TRACE] tạm — chụp trạng thái cache TRƯỚC khi call nào ghi đè =====
+                bool _traceWatch = TraceWatchList.Count > 0 &&
+                    (TraceWatchList.Contains(currentText) ||
+                     (lab.gameObject != null && ContainsAnyWatchName(lab.gameObject.name)));
+                bool _hadOrigBefore = OriginalTextCache.TryGetValue(lab, out string _preOrig) && !string.IsNullOrEmpty(_preOrig);
+                bool _hadKeyBefore = LabelSourceKeyCache.TryGetValue(lab, out string _preKey) && !string.IsNullOrEmpty(_preKey);
+                string _priorIdentity = _hadKeyBefore ? _preKey : (_hadOrigBefore ? _preOrig : null);
+
                 string lookupText = currentText;
                 try
                 {
@@ -3284,6 +3344,7 @@ public class PlagueVnMod : BaseUnityPlugin
                 catch { }
 
                 string newText = null;
+                string _resolver = "none";
 
                 // FIX LANG-13 (ưu tiên 0): tra theo KEY GỐC của label — đọc từ
                 // component UILabelAutotranslate nếu game gắn component đó cho
@@ -3299,27 +3360,28 @@ public class PlagueVnMod : BaseUnityPlugin
                 {
                     newText = keyText;
                     keyResolved++;
+                    _resolver = "AutotranslateKey(priority0)";
                 }
                 // Ưu tiên 1: TranslationDict (FE_* key gốc)
                 else if (TranslationDict.TryGetValue(lookupText, out newText) &&
                     !string.IsNullOrEmpty(newText) &&
                     !string.Equals(newText, currentText, StringComparison.Ordinal))
                 {
-                    // Found in TranslationDict
+                    _resolver = "TranslationDict";
                 }
                 // Ưu tiên 2: EnglishTextDict — "Options" = "Tùy chọn" thắng FE reverse "Cài Đặt"
                 else if (EnglishTextDict.TryGetValue(lookupText, out newText) &&
                          !string.IsNullOrEmpty(newText) &&
                          !string.Equals(newText, currentText, StringComparison.Ordinal))
                 {
-                    // Found in EnglishTextDict
+                    _resolver = "EnglishTextDict(REVERSE)";
                 }
                 else if (EnglishToCustomDict.Count > 0 &&
                          EnglishToCustomDict.TryGetValue(lookupText, out newText) &&
                          !string.IsNullOrEmpty(newText) &&
                          !string.Equals(newText, currentText, StringComparison.Ordinal))
                 {
-                    // Found in EnglishToCustomDict (reverse lookup)
+                    _resolver = "EnglishToCustomDict(REVERSE)";
                 }
                 // FIX OPT-02: ưu tiên 4 — text đang là KEY THÔ (bị stamp từ lần switch
                 // official trước khi GetText miss, hoặc label spawn muộn) mà dict mod
@@ -3334,19 +3396,38 @@ public class PlagueVnMod : BaseUnityPlugin
                 {
                     newText = fbText;
                     fallbackResolved++;
+                    _resolver = "GameFallback(FeKey)";
                 }
                 else
                 {
                     newText = null;
                 }
 
+                if (_traceWatch)
+                {
+                    bool isReverse = _resolver.IndexOf("REVERSE", StringComparison.Ordinal) >= 0;
+                    Debug.Log("[TRACE] UILabel " + (lab.gameObject != null ? lab.gameObject.name : "?")
+                        + "\n  text.before = \"" + currentText + "\""
+                        + "\n  priorIdentity(before pass) = " + (_priorIdentity ?? "(none)")
+                        + "\n  sourceKey(LabelSourceKeyCache after capture) = " + (LabelSourceKeyCache.TryGetValue(lab, out string _skAfter) ? _skAfter : "(none)")
+                        + "\n  sourceEnglish(lookupText) = \"" + lookupText + "\""
+                        + "\n  resolver = " + _resolver
+                        + "\n  translated = " + (newText != null ? "\"" + newText + "\"" : "(null)")
+                        + "\n  text.after = " + (newText != null ? "\"" + newText + "\"" : "\"" + currentText + "\" (unchanged)"));
+
+                    if (isReverse)
+                    {
+                        Debug.Log("[TRACE] REVERSE FALLBACK"
+                            + "\n  input = \"" + lookupText + "\""
+                            + "\n  ValueToEnglish => " + (TryMapValueToEnglish(lookupText, out string _v2e) ? "\"" + _v2e + "\"" : "(miss)")
+                            + (_priorIdentity != null
+                                ? "\n  WARNING: label already has source identity = \"" + _priorIdentity + "\" — reverse lookup này CÓ THỂ đang bỏ qua identity đã đóng băng!"
+                                : "\n  (label chưa có source identity trước pass này — reverse lookup ở đây là hợp lệ theo thiết kế)"));
+                    }
+                }
+
                 if (newText != null)
                 {
-                    if (currentText == "Simple" || (lab.gameObject != null && lab.gameObject.name.IndexOf("Reset", StringComparison.OrdinalIgnoreCase) >= 0))
-                        Debug.Log("[Localizer][DEBUG-RESET] go=" + lab.gameObject.name
-                            + " currentText=" + currentText
-                            + " cachedOrig=" + (OriginalTextCache.TryGetValue(lab, out string dbgOrig) ? dbgOrig : "(none)")
-                            + " lookupText(sau resolve)=" + lookupText);
                     lab.text = newText;
                     refreshed++;
                 }
