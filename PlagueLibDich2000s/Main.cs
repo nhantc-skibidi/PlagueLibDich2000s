@@ -2836,7 +2836,7 @@ public class PlagueVnMod : BaseUnityPlugin
         {
             Debug.Log("[v2.7] UI ready — ActiveLanguage official = " + act + " → không ForceCustomLanguage");
         }
-
+       
 
     }
 
@@ -3355,12 +3355,30 @@ public class PlagueVnMod : BaseUnityPlugin
                 // biệt 2 ngữ cảnh này. Không đọc được key (component không có /
                 // field không khớp) → tự rơi xuống chuỗi ưu tiên 1-3 như cũ.
                 string keyText = TryResolveLabelKeyText(lab);
-                if (keyText != null &&
-                    !string.Equals(keyText, currentText, StringComparison.Ordinal))
+                if (keyText != null)
                 {
-                    newText = keyText;
-                    keyResolved++;
-                    _resolver = "AutotranslateKey(priority0)";
+                    // FIX RAL-01: keyText != null nghĩa là component có canonical FE
+                    // identity VÀ đã phân giải thành công — bất kể kết quả có trùng
+                    // currentText hay không. Trước đây khi keyText == currentText
+                    // (đã đúng từ pass trước), code coi như "priority-0 không áp dụng"
+                    // và rơi xuống EnglishTextDict/EnglishToCustomDict tra theo
+                    // lookupText (= English source đã đóng băng) — English source đó
+                    // có thể trùng 1 entry KHÔNG LIÊN QUAN trong EnglishTextDict (vd
+                    // "Single Player" dùng cho đếm người chơi trong kịch bản, khác hẳn
+                    // FE_Single_Player của menu) → ghi đè sai. Khi đã có canonical FE
+                    // identity, KHÔNG BAO GIỜ được rơi xuống reverse lookup nữa — dừng
+                    // tại đây, dù có đổi text hay không.
+                    if (!string.Equals(keyText, currentText, StringComparison.Ordinal))
+                    {
+                        newText = keyText;
+                        keyResolved++;
+                        _resolver = "AutotranslateKey(priority0)";
+                    }
+                    else
+                    {
+                        newText = null; // đã đúng, không cần ghi lại — nhưng KHÔNG fallthrough
+                        _resolver = "AutotranslateKey(priority0,unchanged)";
+                    }
                 }
                 // Ưu tiên 1: TranslationDict (FE_* key gốc)
                 else if (TranslationDict.TryGetValue(lookupText, out newText) &&
