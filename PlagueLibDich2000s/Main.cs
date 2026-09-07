@@ -456,6 +456,62 @@ public class PlagueVnMod : BaseUnityPlugin
         catch { return false; }
     }
 
+    /// <summary>
+    /// OptionsSelector "chết": prefab clone trên nút Reset (UIButton), không phải
+    /// hàng chọn < giá trị >. Vanilla OnEnable cố tình KHÔNG Set() khi
+    /// mnCurrent==0 nên caption FE_Reset_All_Progress sống sót. Patch Set(0)
+    /// của mod đè caption đó bằng optionLoc[0] = SIMPLE → "Đơn giản".
+    /// </summary>
+    public static bool IsDeadOptionsSelector(OptionsSelector s)
+    {
+        if (s == null || s.gameObject == null) return true;
+        try
+        {
+            Transform t = s.transform;
+            int hops = 0;
+            while (t != null && hops < 8)
+            {
+                string n = t.name;
+                if (!string.IsNullOrEmpty(n)
+                    && n.IndexOf("Reset", StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+                t = t.parent;
+                hops++;
+            }
+
+            // Selector thật luôn có 2 nút mũi tên. Nút Reset chỉ là UIButton.
+            if (s.optionNext == null || s.optionPrev == null) return true;
+            if (s.optionEnum == null || s.optionEnum.Count < 2) return true;
+
+            // Cùng GameObject vừa là UIButton (generalReset) vừa leftover OptionsSelector.
+            if (s.GetComponent<UIButton>() != null
+                && s.GetComponent<OptionsSelector>() != null
+                && (s.optionNext == null || !s.optionNext.gameObject.activeSelf
+                    || s.optionPrev == null || !s.optionPrev.gameObject.activeSelf))
+                return true;
+        }
+        catch { return true; }
+        return false;
+    }
+
+    /// <summary>
+    /// Label đang mang FE key KHÔNG thuộc optionLoc của selector này
+    /// (điển hình: FE_Reset_All_Progress trên optionCurrent leftover).
+    /// </summary>
+    public static bool OptionsSelectorWouldClobberForeignKey(OptionsSelector s, string currentText)
+    {
+        if (s == null || s.optionLoc == null || string.IsNullOrEmpty(currentText)) return false;
+        string t = currentText.Trim();
+        if (t.Length == 0) return false;
+        if (!ConfigManager.IsFeKey(t) && t.IndexOf("FE_Reset", StringComparison.OrdinalIgnoreCase) < 0)
+            return false;
+        for (int i = 0; i < s.optionLoc.Count; i++)
+        {
+            if (string.Equals(s.optionLoc[i], t, StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
+        return true;
+    }
     public static bool FontsReady = false;
     public static bool ApplyingFont = false;
     static GameObject FontProxyHost;
@@ -4585,15 +4641,81 @@ public static class OptionsSelector_OnEnable_FixIndexZero_Patch
             if (__instance.optionEnum.Count == 0) return;
             if (FiCurrent == null) return;
 
-            int cur = (int)FiCurrent.GetValue(__instance);
+            // LANG-RESET: KHÔNG BAO GIỜ Set(0) trên leftover OptionsSelector của
+            // nút Reset (Options_General_Reset/Button_Reset). Game vanilla bỏ
+            // Set khi mnCurrent==0 CỐ TÌNH — caption inspector là
+            // FE_Reset_All_Progress. Set(0) ghi optionLoc[0]=SIMPLE lên label
+            // → UI hiện "Đơn giản" và khóa khi đổi ngôn ngữ (poison originalLabelText).
+            if (PlagueVnMod.IsDeadOptionsSelector(__instance))
+            {
+                HealResetCaption(__instance);
+                return;
+            }
 
-            // Bug gốc của game: OnEnable() chỉ tự Set() lại khi mnCurrent > 0 — bỏ sót
-            // index 0. Ta gọi lại Set(0) thủ công CHỈ khi rơi đúng trường hợp game bỏ sót
-            // (mnCurrent == 0). Set(0) không có side effect nguy hiểm (không gọi callback,
-            // chỉ set label + trả optionEnum[0]) — và việc gọi lại Set() sẽ tự động chạy
-            // qua OptionsSelector_Set_Localize_Patch đã có, không cần viết lại logic dịch.
+            int cur = (int)FiCurrent.GetValue(__instance);
+            if (cur < 0) cur = 0;
+            if (cur >= __instance.optionEnum.Count) return;
+
+            // Không ép index 0 nếu label đang hiện FE key khác optionLoc
+            // (Interface inspector = FE_Options_Normal, mnCurrent mặc định 0 —
+            // SetActive sẽ SetByName sau; Set(0) ở đây flash + poison).
+            try
+            {
+                if (__instance.optionCurrent != null)
+                {
+                    UILabel lab = __instance.optionCurrent.GetComponent<UILabel>();
+                    if (lab != null
+                        && PlagueVnMod.OptionsSelectorWouldClobberForeignKey(__instance, lab.text))
+                        return;
+                }
+            }
+            catch { }
+
+            // Chỉ re-apply index HIỆN TẠI (dịch lại), không force 0.
             if (cur == 0)
                 __instance.Set(0);
+        }
+        catch { }
+    }
+
+    static void HealResetCaption(OptionsSelector s)
+    {
+        try
+        {
+            if (s == null || s.optionCurrent == null) return;
+            UILabel lab = s.optionCurrent.GetComponent<UILabel>();
+            if (lab == null) return;
+
+            const string resetKey = "FE_Reset_All_Progress";
+            try
+            {
+                PlagueVnMod.LabelSourceKeyCache.Remove(lab);
+                PlagueVnMod.LabelSourceKeyCache.Add(lab, resetKey);
+            }
+            catch { PlagueVnMod.CacheLabelSourceKey(lab, resetKey); }
+
+            string shown = resetKey;
+            if (PlagueVnMod.TryGetTranslation(resetKey, out string tr)
+                && !string.IsNullOrEmpty(tr))
+                shown = tr;
+            else
+            {
+                try
+                {
+                    string g = CLocalisationManager.GetText(resetKey);
+                    if (!string.IsNullOrEmpty(g) && !string.Equals(g, resetKey, StringComparison.Ordinal))
+                        shown = g;
+                }
+                catch { }
+            }
+
+            UILabelAutotranslate at = lab.GetComponent<UILabelAutotranslate>();
+            if (at != null)
+            {
+                try { at.SetInitialText(resetKey, true); } catch { lab.text = shown; }
+            }
+            else
+                lab.text = shown;
         }
         catch { }
     }
