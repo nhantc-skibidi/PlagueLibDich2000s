@@ -4671,7 +4671,7 @@ public static class OptionsSelector_OnEnable_FixIndexZero_Patch
             }
             catch { }
 
-            // Chỉ re-apply index HIỆN TẠI (dịch lại), không force 0.
+            // Chỉ re-apply index HIỆN TẠI (dịch lại), không force 0. lol
             if (cur == 0)
                 __instance.Set(0);
         }
@@ -5123,7 +5123,7 @@ public static class OptionsSelector_Set_Localize_Patch
         }
         catch { }
 
-        // ƯU TIÊN 2 (fallback — hành vi cũ, KHÔNG đổi): dict global hiện tại.
+        // ƯU TIÊN 2 (fallback — hành vi cũ, KHÔNG đổi): dict global hiện tại. s 
         if (t == null)
         {
             if (!PlagueVnMod.TryResolveLabelText(loc, out t)
