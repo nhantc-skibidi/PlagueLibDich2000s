@@ -112,9 +112,10 @@ public class PlagueVnMod : BaseUnityPlugin
         new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "Simple", "Đơn giản", "Single Player", "1 Người", "Chơi Đơn",
-            "Reset All Progress", "Tiến trình", "Progress"
+            "Reset All Progress", "Tiến trình", "Progress",
+            "Xóa hết tiến trình", "FE_Reset_All_Progress", "AUTHORITY", "Tín nhiệm"
         };
-    static readonly string[] TraceWatchNameParts = { "Reset", "Single", "Progress" };
+    static readonly string[] TraceWatchNameParts = { "Reset", "Single", "Progress", "Button", "Caption" };
     static bool ContainsAnyWatchName(string goName)
     {
         if (string.IsNullOrEmpty(goName)) return false;
@@ -455,6 +456,62 @@ public class PlagueVnMod : BaseUnityPlugin
         catch { return false; }
     }
 
+    /// <summary>
+    /// OptionsSelector "chết": prefab clone trên nút Reset (UIButton), không phải
+    /// hàng chọn < giá trị >. Vanilla OnEnable cố tình KHÔNG Set() khi
+    /// mnCurrent==0 nên caption FE_Reset_All_Progress sống sót. Patch Set(0)
+    /// của mod đè caption đó bằng optionLoc[0] = SIMPLE → "Đơn giản".
+    /// </summary>
+    public static bool IsDeadOptionsSelector(OptionsSelector s)
+    {
+        if (s == null || s.gameObject == null) return true;
+        try
+        {
+            Transform t = s.transform;
+            int hops = 0;
+            while (t != null && hops < 8)
+            {
+                string n = t.name;
+                if (!string.IsNullOrEmpty(n)
+                    && n.IndexOf("Reset", StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+                t = t.parent;
+                hops++;
+            }
+
+            // Selector thật luôn có 2 nút mũi tên. Nút Reset chỉ là UIButton.
+            if (s.optionNext == null || s.optionPrev == null) return true;
+            if (s.optionEnum == null || s.optionEnum.Count < 2) return true;
+
+            // Cùng GameObject vừa là UIButton (generalReset) vừa leftover OptionsSelector.
+            if (s.GetComponent<UIButton>() != null
+                && s.GetComponent<OptionsSelector>() != null
+                && (s.optionNext == null || !s.optionNext.gameObject.activeSelf
+                    || s.optionPrev == null || !s.optionPrev.gameObject.activeSelf))
+                return true;
+        }
+        catch { return true; }
+        return false;
+    }
+
+    /// <summary>
+    /// Label đang mang FE key KHÔNG thuộc optionLoc của selector này
+    /// (điển hình: FE_Reset_All_Progress trên optionCurrent leftover).
+    /// </summary>
+    public static bool OptionsSelectorWouldClobberForeignKey(OptionsSelector s, string currentText)
+    {
+        if (s == null || s.optionLoc == null || string.IsNullOrEmpty(currentText)) return false;
+        string t = currentText.Trim();
+        if (t.Length == 0) return false;
+        if (!ConfigManager.IsFeKey(t) && t.IndexOf("FE_Reset", StringComparison.OrdinalIgnoreCase) < 0)
+            return false;
+        for (int i = 0; i < s.optionLoc.Count; i++)
+        {
+            if (string.Equals(s.optionLoc[i], t, StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
+        return true;
+    }
     public static bool FontsReady = false;
     public static bool ApplyingFont = false;
     static GameObject FontProxyHost;
@@ -2056,13 +2113,22 @@ public class PlagueVnMod : BaseUnityPlugin
         try
         {
             if (string.IsNullOrEmpty(newText)) return;
+            bool _resetWatch = TraceWatchList.Contains(newText.Trim());
+            if (_resetWatch)
+                Debug.Log("[TRACE-RESET] SetInitialText_Prefix CALLED — newText(before)=\"" + newText
+                    + "\" IsCustomLanguageActive=" + IsCustomLanguageActive()
+                    + (IsCustomLanguageActive() ? " → SKIP (guard, no-op — case E candidate: nếu sau đây lab.text đổi thì KHÔNG PHẢI do prefix này)" : " → xử lý tiếp (official-language branch)"));
             if (IsCustomLanguageActive()) return;
             string t = newText.Trim();
             if (t.Length == 0) return;
             if (ConfigManager.IsFeKey(t)) return; // key lành — game tự GetText theo key
             // Bản dịch custom/old-value kẹt → trả về nguồn để component lưu ĐÚNG key.
             if (TryMapValueToEnglish(t, out string eng) && !string.IsNullOrEmpty(eng))
+            {
+                if (_resetWatch)
+                    Debug.Log("[TRACE-RESET] SetInitialText_Prefix REWROTE newText \"" + t + "\" → \"" + eng + "\" (official-language poison-detect branch)");
                 newText = eng;
+            }
         }
         catch { }
     }
@@ -2101,6 +2167,16 @@ public class PlagueVnMod : BaseUnityPlugin
 
             string cur = lab.text;
             if (string.IsNullOrEmpty(cur)) return;
+
+            bool _resetTrace = lab.gameObject != null &&
+                (lab.gameObject.name.IndexOf("Reset", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                 TraceWatchList.Contains(cur));
+            string _rrRawKey = null, _rrKeyText = null;
+            if (_resetTrace)
+            {
+                _rrRawKey = TryGetLabelRawKey(lab);          // đọc field component TRỰC TIẾP, không qua cache
+                _rrKeyText = TryResolveLabelKeyText(lab);     // kết quả dịch nếu component có FE key
+            }
 
             bool _traceWatch = TraceWatchList.Count > 0 &&
                 (TraceWatchList.Contains(cur) ||
@@ -2155,6 +2231,18 @@ public class PlagueVnMod : BaseUnityPlugin
                 if (_traceWatch)
                     Debug.Log("[TRACE] OnEnable " + (lab.gameObject != null ? lab.gameObject.name : "?")
                         + " — source rỗng, bỏ qua. identitySource=" + _identitySource);
+                if (_resetTrace)
+                    Debug.Log("[TRACE-RESET]"
+                        + "\n  go = " + (lab.gameObject != null ? lab.gameObject.name : "?")
+                        + "\n  text.before = \"" + cur + "\""
+                        + "\n  rawKey = " + (_rrRawKey ?? "(null)")
+                        + "\n  OriginalTextCache = (chưa capture — source rỗng)"
+                        + "\n  LabelSourceKeyCache = (chưa capture — source rỗng)"
+                        + "\n  TryResolveLabelKeyText = " + (_rrKeyText ?? "(null)")
+                        + "\n  lookupText = (n/a — source rỗng)"
+                        + "\n  resolver = (none — early return)"
+                        + "\n  translated = (null)"
+                        + "\n  text.after = \"" + cur + "\" (unchanged)");
                 return;
             }
 
@@ -2175,6 +2263,23 @@ public class PlagueVnMod : BaseUnityPlugin
             {
                 if (TryResolveLabelText(source, out resolved) && !string.IsNullOrEmpty(resolved))
                     _resolver = "TryResolveLabelText(non-FE, REVERSE-capable)";
+            }
+
+            if (_resetTrace)
+            {
+                LabelSourceKeyCache.TryGetValue(lab, out string _rrLskAfter);
+                OriginalTextCache.TryGetValue(lab, out string _rrOtcAfter);
+                Debug.Log("[TRACE-RESET]"
+                    + "\n  go = " + (lab.gameObject != null ? lab.gameObject.name : "?")
+                    + "\n  text.before = \"" + cur + "\""
+                    + "\n  rawKey = " + (_rrRawKey ?? "(null)")
+                    + "\n  OriginalTextCache = " + (_rrOtcAfter ?? "(none)")
+                    + "\n  LabelSourceKeyCache = " + (_rrLskAfter ?? "(none)")
+                    + "\n  TryResolveLabelKeyText = " + (_rrKeyText ?? "(null)")
+                    + "\n  lookupText(=source) = \"" + source + "\" (isFeSource=" + isFeSource + ", identitySource=" + _identitySource + ")"
+                    + "\n  resolver = " + _resolver
+                    + "\n  translated = " + (resolved != null ? "\"" + resolved + "\"" : "(null)")
+                    + "\n  text.after = " + ((!string.IsNullOrEmpty(resolved) && !string.Equals(resolved, cur, StringComparison.Ordinal)) ? "\"" + resolved + "\"" : "\"" + cur + "\" (unchanged)"));
             }
 
             if (_traceWatch)
@@ -2836,7 +2941,7 @@ public class PlagueVnMod : BaseUnityPlugin
         {
             Debug.Log("[v2.7] UI ready — ActiveLanguage official = " + act + " → không ForceCustomLanguage");
         }
-       
+
 
     }
 
@@ -3328,6 +3433,11 @@ public class PlagueVnMod : BaseUnityPlugin
                 bool _hadKeyBefore = LabelSourceKeyCache.TryGetValue(lab, out string _preKey) && !string.IsNullOrEmpty(_preKey);
                 string _priorIdentity = _hadKeyBefore ? _preKey : (_hadOrigBefore ? _preOrig : null);
 
+                bool _resetTrace = lab.gameObject != null &&
+                    (lab.gameObject.name.IndexOf("Reset", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                     TraceWatchList.Contains(currentText));
+                string _rrRawKeyBefore = _resetTrace ? TryGetLabelRawKey(lab) : null;
+
                 string lookupText = currentText;
                 try
                 {
@@ -3421,6 +3531,23 @@ public class PlagueVnMod : BaseUnityPlugin
                     newText = null;
                 }
 
+                if (_resetTrace)
+                {
+                    LabelSourceKeyCache.TryGetValue(lab, out string _rrLskAfter);
+                    OriginalTextCache.TryGetValue(lab, out string _rrOtcAfter);
+                    Debug.Log("[TRACE-RESET]"
+                        + "\n  go = " + (lab.gameObject != null ? lab.gameObject.name : "?")
+                        + "\n  text.before = \"" + currentText + "\""
+                        + "\n  rawKey(before capture) = " + (_rrRawKeyBefore ?? "(null)")
+                        + "\n  OriginalTextCache = " + (_rrOtcAfter ?? "(none)")
+                        + "\n  LabelSourceKeyCache = " + (_rrLskAfter ?? "(none)")
+                        + "\n  TryResolveLabelKeyText = " + (keyText ?? "(null)")
+                        + "\n  lookupText = \"" + lookupText + "\""
+                        + "\n  resolver = " + _resolver
+                        + "\n  translated = " + (newText != null ? "\"" + newText + "\"" : "(null)")
+                        + "\n  text.after = " + (newText != null ? "\"" + newText + "\"" : "\"" + currentText + "\" (unchanged)"));
+                }
+
                 if (_traceWatch)
                 {
                     bool isReverse = _resolver.IndexOf("REVERSE", StringComparison.Ordinal) >= 0;
@@ -3438,9 +3565,19 @@ public class PlagueVnMod : BaseUnityPlugin
                         Debug.Log("[TRACE] REVERSE FALLBACK"
                             + "\n  input = \"" + lookupText + "\""
                             + "\n  ValueToEnglish => " + (TryMapValueToEnglish(lookupText, out string _v2e) ? "\"" + _v2e + "\"" : "(miss)")
-                            + (_priorIdentity != null
-                                ? "\n  WARNING: label already has source identity = \"" + _priorIdentity + "\" — reverse lookup này CÓ THỂ đang bỏ qua identity đã đóng băng!"
-                                : "\n  (label chưa có source identity trước pass này — reverse lookup ở đây là hợp lệ theo thiết kế)"));
+                            + (_hadKeyBefore
+                                // Chỉ cảnh báo khi identity trước đó là CANONICAL FE KEY
+                                // (LabelSourceKeyCache) — đây mới là trường hợp nguy hiểm
+                                // (bug Single Player). Nếu identity trước đó chỉ là
+                                // OriginalTextCache (English text gốc, KHÔNG có FE key —
+                                // case AUTHORITY/IG_Complete: label không có
+                                // UILabelAutotranslate/field FE_* nào để bám vào), reverse
+                                // lookup là CƠ CHẾ DUY NHẤT và ĐÚNG THIẾT KẾ cho các label
+                                // này — không phải bug, không cảnh báo.
+                                ? "\n  WARNING: label đã có CANONICAL FE identity = \"" + _preKey + "\" — reverse lookup này ĐANG GHI ĐÈ lên FE identity đã đóng băng! (đây là bug thật)"
+                                : (_hadOrigBefore
+                                    ? "\n  (label KHÔNG có FE key — chỉ có English text gốc \"" + _preOrig + "\" — reverse lookup lặp lại mỗi pass là ĐÚNG THIẾT KẾ cho loại label này, vd stat/live-value label)"
+                                    : "\n  (label chưa có source identity trước pass này — reverse lookup ở đây là hợp lệ theo thiết kế)")));
                     }
                 }
 
@@ -4461,22 +4598,66 @@ public class PlagueVnMod : BaseUnityPlugin
             StringComparison.OrdinalIgnoreCase);
     }
 
+    // XENOLITH (hướng sạch): game nạp Data/DiseaseStrings/xenolith_type.strings.txt
+    // vào diseaseLocalisationText. GetTextInternal remap tag TRƯỚC khi tra ngôn ngữ
+    // (Transmission→Structure, DNA→XNA, …). Mod phải làm cùng bước khi tự tra dict,
+    // KHÔNG đụng identity / SetInitialText / AutoTranslate / OnEnable.
+    static FieldInfo _fiDiseaseLocalisationText;
+
+    public static string ApplyDiseaseLocalisationRemap(string key)
+    {
+        if (string.IsNullOrEmpty(key)) return key;
+        try
+        {
+            if (_fiDiseaseLocalisationText == null)
+            {
+                _fiDiseaseLocalisationText = typeof(CLocalisationManager).GetField(
+                    "diseaseLocalisationText",
+                    BindingFlags.NonPublic | BindingFlags.Static);
+            }
+            if (_fiDiseaseLocalisationText == null) return key;
+            var dict = _fiDiseaseLocalisationText.GetValue(null) as Dictionary<string, string>;
+            if (dict == null || dict.Count == 0) return key;
+            if (dict.TryGetValue(key, out string mapped) && !string.IsNullOrEmpty(mapped))
+                return mapped;
+            if (dict.TryGetValue(key.ToLowerInvariant(), out mapped) && !string.IsNullOrEmpty(mapped))
+                return mapped;
+        }
+        catch { }
+        return key;
+    }
+
     public static bool TryGetTranslation(string key, out string value)
     {
         // FIX LANG-32: chỉ trả bản dịch custom khi đang ở custom language.
-        // Trước đây TranslationDict vẫn giữ entry của pack cuối → GetLoc / AboutMod
-        // button / một số path vẫn trả tiếng Việt sau khi đã chuyển về official
-        // (Help & Info + "Về Bản Mod" kẹt VN như video).
         if (!IsCustomLanguageActive())
         {
             value = null;
             return false;
         }
-        // FIX CR-11: bỏ các lookup key.ToLower() — cả 2 dict đã là OrdinalIgnoreCase
-        // (lookup không phân biệt hoa thường) nên lookup thường đã đủ, và ToLower()
-        // còn phụ thuộc culture của Windows (bug tiềm ẩn trên máy Turkish locale).
-        // FIX OPT-05b: entry value rỗng coi như KHÔNG có — nếu trả true với value ""
-        // thì GetText_Fallback_Patch sẽ đè __result = "" → label TRỐNG (tệ hơn key thô).
+        if (string.IsNullOrEmpty(key))
+        {
+            value = null;
+            return false;
+        }
+
+        // Disease remap giống GetTextInternal — nếu đã remap thì CHỈ tra key mới
+        // (không fallback key cũ → tránh TRUYỀN NHIỄM trên màn Structure).
+        string remapped = ApplyDiseaseLocalisationRemap(key);
+        if (!string.Equals(remapped, key, StringComparison.Ordinal))
+        {
+            if (ScenarioDict.TryGetValue(remapped, out value) && !string.IsNullOrEmpty(value))
+                return true;
+            if (TranslationDict.TryGetValue(remapped, out value) && !string.IsNullOrEmpty(value))
+                return true;
+            if (EnglishTextDict.TryGetValue(remapped, out value) && !string.IsNullOrEmpty(value))
+                return true;
+            if (EnglishToCustomDict.TryGetValue(remapped, out value) && !string.IsNullOrEmpty(value))
+                return true;
+            value = null;
+            return false;
+        }
+
         if (ScenarioDict.TryGetValue(key, out value) && !string.IsNullOrEmpty(value))
             return true;
         if (TranslationDict.TryGetValue(key, out value) && !string.IsNullOrEmpty(value))
@@ -4504,15 +4685,81 @@ public static class OptionsSelector_OnEnable_FixIndexZero_Patch
             if (__instance.optionEnum.Count == 0) return;
             if (FiCurrent == null) return;
 
-            int cur = (int)FiCurrent.GetValue(__instance);
+            // LANG-RESET: KHÔNG BAO GIỜ Set(0) trên leftover OptionsSelector của
+            // nút Reset (Options_General_Reset/Button_Reset). Game vanilla bỏ
+            // Set khi mnCurrent==0 CỐ TÌNH — caption inspector là
+            // FE_Reset_All_Progress. Set(0) ghi optionLoc[0]=SIMPLE lên label
+            // → UI hiện "Đơn giản" và khóa khi đổi ngôn ngữ (poison originalLabelText).
+            if (PlagueVnMod.IsDeadOptionsSelector(__instance))
+            {
+                HealResetCaption(__instance);
+                return;
+            }
 
-            // Bug gốc của game: OnEnable() chỉ tự Set() lại khi mnCurrent > 0 — bỏ sót
-            // index 0. Ta gọi lại Set(0) thủ công CHỈ khi rơi đúng trường hợp game bỏ sót
-            // (mnCurrent == 0). Set(0) không có side effect nguy hiểm (không gọi callback,
-            // chỉ set label + trả optionEnum[0]) — và việc gọi lại Set() sẽ tự động chạy
-            // qua OptionsSelector_Set_Localize_Patch đã có, không cần viết lại logic dịch.
+            int cur = (int)FiCurrent.GetValue(__instance);
+            if (cur < 0) cur = 0;
+            if (cur >= __instance.optionEnum.Count) return;
+
+            // Không ép index 0 nếu label đang hiện FE key khác optionLoc
+            // (Interface inspector = FE_Options_Normal, mnCurrent mặc định 0 —
+            // SetActive sẽ SetByName sau; Set(0) ở đây flash + poison).
+            try
+            {
+                if (__instance.optionCurrent != null)
+                {
+                    UILabel lab = __instance.optionCurrent.GetComponent<UILabel>();
+                    if (lab != null
+                        && PlagueVnMod.OptionsSelectorWouldClobberForeignKey(__instance, lab.text))
+                        return;
+                }
+            }
+            catch { }
+
+            // Chỉ re-apply index HIỆN TẠI (dịch lại), không force 0. lol
             if (cur == 0)
                 __instance.Set(0);
+        }
+        catch { }
+    }
+
+    static void HealResetCaption(OptionsSelector s)
+    {
+        try
+        {
+            if (s == null || s.optionCurrent == null) return;
+            UILabel lab = s.optionCurrent.GetComponent<UILabel>();
+            if (lab == null) return;
+
+            const string resetKey = "FE_Reset_All_Progress";
+            try
+            {
+                PlagueVnMod.LabelSourceKeyCache.Remove(lab);
+                PlagueVnMod.LabelSourceKeyCache.Add(lab, resetKey);
+            }
+            catch { PlagueVnMod.CacheLabelSourceKey(lab, resetKey); }
+
+            string shown = resetKey;
+            if (PlagueVnMod.TryGetTranslation(resetKey, out string tr)
+                && !string.IsNullOrEmpty(tr))
+                shown = tr;
+            else
+            {
+                try
+                {
+                    string g = CLocalisationManager.GetText(resetKey);
+                    if (!string.IsNullOrEmpty(g) && !string.Equals(g, resetKey, StringComparison.Ordinal))
+                        shown = g;
+                }
+                catch { }
+            }
+
+            UILabelAutotranslate at = lab.GetComponent<UILabelAutotranslate>();
+            if (at != null)
+            {
+                try { at.SetInitialText(resetKey, true); } catch { lab.text = shown; }
+            }
+            else
+                lab.text = shown;
         }
         catch { }
     }
@@ -4548,8 +4795,17 @@ public static class GetText_Fallback_Patch
 
         if (PlagueVnMod.IsCustomLanguageActive())
         {
+            // Game đã dịch xong (có thể sau disease remap) — thử dịch tiếp nếu
+            // __result vẫn là English key (Structure, XNA, …).
             if (__result != tagName && !string.Equals(__result, tagName, StringComparison.OrdinalIgnoreCase))
+            {
+                if (PlagueVnMod.TryGetTranslation(__result, out string tr2)
+                    && !string.IsNullOrEmpty(tr2)
+                    && !string.Equals(tr2, __result, StringComparison.Ordinal))
+                    __result = tr2;
                 return;
+            }
+            // Miss hoàn toàn — TryGetTranslation tự disease-remap
             if (PlagueVnMod.TryGetTranslation(tagName, out string translated))
                 __result = translated;
             return;
@@ -4920,7 +5176,7 @@ public static class OptionsSelector_Set_Localize_Patch
         }
         catch { }
 
-        // ƯU TIÊN 2 (fallback — hành vi cũ, KHÔNG đổi): dict global hiện tại.
+        // ƯU TIÊN 2 (fallback — hành vi cũ, KHÔNG đổi): dict global hiện tại. 
         if (t == null)
         {
             if (!PlagueVnMod.TryResolveLabelText(loc, out t)
