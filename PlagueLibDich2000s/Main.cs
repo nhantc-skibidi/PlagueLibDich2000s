@@ -4598,22 +4598,66 @@ public class PlagueVnMod : BaseUnityPlugin
             StringComparison.OrdinalIgnoreCase);
     }
 
+    // XENOLITH (hướng sạch): game nạp Data/DiseaseStrings/xenolith_type.strings.txt
+    // vào diseaseLocalisationText. GetTextInternal remap tag TRƯỚC khi tra ngôn ngữ
+    // (Transmission→Structure, DNA→XNA, …). Mod phải làm cùng bước khi tự tra dict,
+    // KHÔNG đụng identity / SetInitialText / AutoTranslate / OnEnable.
+    static FieldInfo _fiDiseaseLocalisationText;
+
+    public static string ApplyDiseaseLocalisationRemap(string key)
+    {
+        if (string.IsNullOrEmpty(key)) return key;
+        try
+        {
+            if (_fiDiseaseLocalisationText == null)
+            {
+                _fiDiseaseLocalisationText = typeof(CLocalisationManager).GetField(
+                    "diseaseLocalisationText",
+                    BindingFlags.NonPublic | BindingFlags.Static);
+            }
+            if (_fiDiseaseLocalisationText == null) return key;
+            var dict = _fiDiseaseLocalisationText.GetValue(null) as Dictionary<string, string>;
+            if (dict == null || dict.Count == 0) return key;
+            if (dict.TryGetValue(key, out string mapped) && !string.IsNullOrEmpty(mapped))
+                return mapped;
+            if (dict.TryGetValue(key.ToLowerInvariant(), out mapped) && !string.IsNullOrEmpty(mapped))
+                return mapped;
+        }
+        catch { }
+        return key;
+    }
+
     public static bool TryGetTranslation(string key, out string value)
     {
         // FIX LANG-32: chỉ trả bản dịch custom khi đang ở custom language.
-        // Trước đây TranslationDict vẫn giữ entry của pack cuối → GetLoc / AboutMod
-        // button / một số path vẫn trả tiếng Việt sau khi đã chuyển về official
-        // (Help & Info + "Về Bản Mod" kẹt VN như video).
         if (!IsCustomLanguageActive())
         {
             value = null;
             return false;
         }
-        // FIX CR-11: bỏ các lookup key.ToLower() — cả 2 dict đã là OrdinalIgnoreCase
-        // (lookup không phân biệt hoa thường) nên lookup thường đã đủ, và ToLower()
-        // còn phụ thuộc culture của Windows (bug tiềm ẩn trên máy Turkish locale).
-        // FIX OPT-05b: entry value rỗng coi như KHÔNG có — nếu trả true với value ""
-        // thì GetText_Fallback_Patch sẽ đè __result = "" → label TRỐNG (tệ hơn key thô).
+        if (string.IsNullOrEmpty(key))
+        {
+            value = null;
+            return false;
+        }
+
+        // Disease remap giống GetTextInternal — nếu đã remap thì CHỈ tra key mới
+        // (không fallback key cũ → tránh TRUYỀN NHIỄM trên màn Structure).
+        string remapped = ApplyDiseaseLocalisationRemap(key);
+        if (!string.Equals(remapped, key, StringComparison.Ordinal))
+        {
+            if (ScenarioDict.TryGetValue(remapped, out value) && !string.IsNullOrEmpty(value))
+                return true;
+            if (TranslationDict.TryGetValue(remapped, out value) && !string.IsNullOrEmpty(value))
+                return true;
+            if (EnglishTextDict.TryGetValue(remapped, out value) && !string.IsNullOrEmpty(value))
+                return true;
+            if (EnglishToCustomDict.TryGetValue(remapped, out value) && !string.IsNullOrEmpty(value))
+                return true;
+            value = null;
+            return false;
+        }
+
         if (ScenarioDict.TryGetValue(key, out value) && !string.IsNullOrEmpty(value))
             return true;
         if (TranslationDict.TryGetValue(key, out value) && !string.IsNullOrEmpty(value))
@@ -4751,8 +4795,17 @@ public static class GetText_Fallback_Patch
 
         if (PlagueVnMod.IsCustomLanguageActive())
         {
+            // Game đã dịch xong (có thể sau disease remap) — thử dịch tiếp nếu
+            // __result vẫn là English key (Structure, XNA, …).
             if (__result != tagName && !string.Equals(__result, tagName, StringComparison.OrdinalIgnoreCase))
+            {
+                if (PlagueVnMod.TryGetTranslation(__result, out string tr2)
+                    && !string.IsNullOrEmpty(tr2)
+                    && !string.Equals(tr2, __result, StringComparison.Ordinal))
+                    __result = tr2;
                 return;
+            }
+            // Miss hoàn toàn — TryGetTranslation tự disease-remap
             if (PlagueVnMod.TryGetTranslation(tagName, out string translated))
                 __result = translated;
             return;
@@ -5123,7 +5176,7 @@ public static class OptionsSelector_Set_Localize_Patch
         }
         catch { }
 
-        // ƯU TIÊN 2 (fallback — hành vi cũ, KHÔNG đổi): dict global hiện tại. s 
+        // ƯU TIÊN 2 (fallback — hành vi cũ, KHÔNG đổi): dict global hiện tại. 
         if (t == null)
         {
             if (!PlagueVnMod.TryResolveLabelText(loc, out t)
