@@ -4610,17 +4610,21 @@ public class PlagueVnMod : BaseUnityPlugin
         try
         {
             if (_fiDiseaseLocalisationText == null)
-            {
                 _fiDiseaseLocalisationText = typeof(CLocalisationManager).GetField(
-                    "diseaseLocalisationText",
-                    BindingFlags.NonPublic | BindingFlags.Static);
-            }
+                    "diseaseLocalisationText", BindingFlags.NonPublic | BindingFlags.Static);
             if (_fiDiseaseLocalisationText == null) return key;
+
             var dict = _fiDiseaseLocalisationText.GetValue(null) as Dictionary<string, string>;
             if (dict == null || dict.Count == 0) return key;
-            if (dict.TryGetValue(key, out string mapped) && !string.IsNullOrEmpty(mapped))
+
+            string mapped;
+            if (dict.TryGetValue(key, out mapped) && !string.IsNullOrEmpty(mapped))
                 return mapped;
-            if (dict.TryGetValue(key.ToLowerInvariant(), out mapped) && !string.IsNullOrEmpty(mapped))
+
+            // Chỉ ToLower khi dict phân biệt hoa/thường (tránh alloc ở hot path)
+            if (!dict.Comparer.Equals("a", "A")
+                && dict.TryGetValue(key.ToLowerInvariant(), out mapped)
+                && !string.IsNullOrEmpty(mapped))
                 return mapped;
         }
         catch { }
@@ -4629,37 +4633,24 @@ public class PlagueVnMod : BaseUnityPlugin
 
     public static bool TryGetTranslation(string key, out string value)
     {
-        // FIX LANG-32: chỉ trả bản dịch custom khi đang ở custom language.
-        if (!IsCustomLanguageActive())
-        {
-            value = null;
-            return false;
-        }
-        if (string.IsNullOrEmpty(key))
-        {
-            value = null;
-            return false;
-        }
+        value = null;
+        if (!IsCustomLanguageActive() || string.IsNullOrEmpty(key)) return false;
 
-        // Disease remap giống GetTextInternal — nếu đã remap thì CHỈ tra key mới
-        // (không fallback key cũ → tránh TRUYỀN NHIỄM trên màn Structure).
+        // Bản dịch kịch bản do mod sở hữu → luôn ưu tiên KEY GỐC (dict game đã bị mod ghi đè)
+        if (ScenarioDict.TryGetValue(key, out value) && !string.IsNullOrEmpty(value))
+            return true;
+
         string remapped = ApplyDiseaseLocalisationRemap(key);
         if (!string.Equals(remapped, key, StringComparison.Ordinal))
         {
-            if (ScenarioDict.TryGetValue(remapped, out value) && !string.IsNullOrEmpty(value))
-                return true;
-            if (TranslationDict.TryGetValue(remapped, out value) && !string.IsNullOrEmpty(value))
-                return true;
-            if (EnglishTextDict.TryGetValue(remapped, out value) && !string.IsNullOrEmpty(value))
-                return true;
-            if (EnglishToCustomDict.TryGetValue(remapped, out value) && !string.IsNullOrEmpty(value))
-                return true;
+            if (ScenarioDict.TryGetValue(remapped, out value) && !string.IsNullOrEmpty(value)) return true;
+            if (TranslationDict.TryGetValue(remapped, out value) && !string.IsNullOrEmpty(value)) return true;
+            if (EnglishTextDict.TryGetValue(remapped, out value) && !string.IsNullOrEmpty(value)) return true;
+            if (EnglishToCustomDict.TryGetValue(remapped, out value) && !string.IsNullOrEmpty(value)) return true;
             value = null;
-            return false;
+            return false; // đã remap thì không fallback key cũ
         }
 
-        if (ScenarioDict.TryGetValue(key, out value) && !string.IsNullOrEmpty(value))
-            return true;
         if (TranslationDict.TryGetValue(key, out value) && !string.IsNullOrEmpty(value))
             return true;
         value = null;
