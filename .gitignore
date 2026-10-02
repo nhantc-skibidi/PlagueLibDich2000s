@@ -1,0 +1,25 @@
+# ============================================================
+# PlagueLibDich2000s — .gitignore
+# FIX CR-19: file này được SETUP.md tham chiếu ("đã nằm trong .gitignore")
+# nhưng KHÔNG tồn tại trong repo → các file nhạy cảm vẫn có nguy cơ bị commit.
+# ============================================================
+
+# Cấu hình đường dẫn máy cá nhân — KHÔNG BAO GIỜ commit (xem SETUP.md)
+Directory.Build.props.user
+
+# Build artifacts — sinh ra khi build, không thuộc source
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# IDE / editor
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# OS
+Thumbs.db
+.DS_Store

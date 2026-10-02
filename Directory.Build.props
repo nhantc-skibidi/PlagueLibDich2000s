@@ -1,0 +1,24 @@
+<Project>
+
+  <!--
+    File này ĐƯỢC commit vào repo — không chứa đường dẫn cá nhân của ai cả.
+    Nó chỉ định nghĩa nơi lấy BepInExDir / GameManagedDir, theo thứ tự ưu tiên:
+
+      1. Directory.Build.props.user (cùng thư mục này) — KHÔNG commit (xem .gitignore),
+         mỗi người dev tự tạo file này với đường dẫn máy của mình.
+      2. Biến môi trường hệ thống BepInExDir / GameManagedDir — nếu ai thích set 1 lần
+         ở Windows thay vì tạo file riêng.
+
+    Xem SETUP.md để biết cách tạo Directory.Build.props.user hoặc set biến môi trường.
+  -->
+
+  <!--
+    FIX CR-17: xoá 2 dòng gán property về chính chính nó (no-op, dễ gây hiểu lầm
+    rằng biến môi trường được đọc ở đây). Thực tế MSBuild tự động import biến môi
+    trường hệ thống thành property (BepInExDir / GameManagedDir), và file
+    Directory.Build.props.user import bên dưới sẽ override nếu tồn tại.
+  -->
+
+  <Import Project="Directory.Build.props.user" Condition="Exists('Directory.Build.props.user')" />
+
+</Project>
