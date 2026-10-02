@@ -7,7 +7,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using UnityEngine;
@@ -520,197 +519,14 @@ public class PlagueVnMod : BaseUnityPlugin
     // FIX S-05 → CFG-08: danh sách font Windows critical chuyển sang
     // ConfigManager ([Fonts] CriticalSystemFonts) — không còn hardcode trong code.
 
-    static void LoadFontsFromJson(string fontDir)
-    {
-        string jsonPath = Path.Combine(fontDir, ConfigManager.JsonConfigFileName); // CFG-08
-        if (!File.Exists(jsonPath)) return;
-
-        // parse tối giản, không cần Newtonsoft
-        string json = File.ReadAllText(jsonPath);
-        // CFG-08: bundle name mặc định lấy từ config ([Fonts] DefaultBundleName).
-        string bundleName = ReadJsonString(json, "bundle") ?? ConfigManager.DefaultBundleName;
-
-        // FIX S-04: sanitize bundleName — không cho phép path separator.
-        if (string.IsNullOrEmpty(bundleName) ||
-            bundleName.IndexOfAny(new[] { '/', '\\', ':', '*' }) >= 0 ||
-            bundleName == ".." || bundleName.Contains(".."))
-        {
-            Debug.LogError("[Localizer] Bundle name invalid: " + bundleName);
-            return;
-        }
-
-        string bundlePath = Path.Combine(fontDir, bundleName);
-        if (!File.Exists(bundlePath))
-            bundlePath = Path.Combine(Paths.PluginPath, bundleName);
-        if (!File.Exists(bundlePath))
-        {
-            Debug.LogWarning("[Localizer] Không thấy bundle: " + bundlePath);
-            return;
-        }
-
-        // FIX S-04: verify final path nằm trong fontDir hoặc Paths.PluginPath.
-        try
-        {
-            string fullFontDir = Path.GetFullPath(fontDir);
-            string fullPlugin = Path.GetFullPath(Paths.PluginPath);
-            string fullBundle = Path.GetFullPath(bundlePath);
-            string dirOfBundle = Path.GetDirectoryName(fullBundle) ?? "";
-            if (!dirOfBundle.Equals(fullFontDir, StringComparison.OrdinalIgnoreCase)
-                && !dirOfBundle.Equals(fullPlugin, StringComparison.OrdinalIgnoreCase))
-            {
-                Debug.LogError("[Localizer] Bundle path escape: " + fullBundle);
-                return;
-            }
-        }
-        catch (Exception ex)
-        {
-            Debug.LogError("[Localizer] Path resolve: " + ex.Message);
-            return;
-        }
-
-        AssetBundle ab = AssetBundle.LoadFromFile(bundlePath);
-        if (ab == null)
-        {
-            Debug.LogWarning("[Localizer] Load bundle fail: " + bundlePath);
-            return;
-        }
-
-        FontBd = LoadSlot(ab, json, "Bd");
-        FontMd = LoadSlot(ab, json, "Md");
-        FontLt = LoadSlot(ab, json, "Lt");
-
-        FontsReady = FontBd != null || FontMd != null || FontLt != null;
-        Debug.Log("[Localizer] Bundle OK Bd=" + (FontBd != null ? FontBd.name : "null")
-            + " Md=" + (FontMd != null ? FontMd.name : "null")
-            + " Lt=" + (FontLt != null ? FontLt.name : "null"));
-
-        ab.Unload(false); // giữ Font objects
-    }
-
-    // FIX LANG-09: scan có ý thức escape — giá trị "a\"b" phải kết thúc ở quote
-    // sau b (quote bị escape không được tính là kết thúc chuỗi), đồng thời unescape
-    // \" \\ \/ \n \t \r \uXXXX về giá trị thật. Trước đây trả substring thô:
-    // mọi escape JSON hiển thị nguyên literal (vd asset "Font\u1ea2Bd" không match
-    // asset thật trong bundle) và value chứa \" bị cắt sai vị trí.
-    static string ReadJsonString(string json, string key)
-    {
-        if (string.IsNullOrEmpty(json) || string.IsNullOrEmpty(key)) return null;
-        string pat = "\"" + key + "\"";
-        int i = json.IndexOf(pat, StringComparison.OrdinalIgnoreCase);
-        if (i < 0) return null;
-        int colon = json.IndexOf(':', i + pat.Length);
-        if (colon < 0) return null;
-        int q1 = json.IndexOf('"', colon + 1);
-        if (q1 < 0) return null;
-        var sb = new StringBuilder();
-        int j = q1 + 1;
-        while (j < json.Length)
-        {
-            char c = json[j];
-            if (c == '\\' && j + 1 < json.Length)
-            {
-                char nx = json[j + 1];
-                if (nx == 'n') sb.Append('\n');
-                else if (nx == 't') sb.Append('\t');
-                else if (nx == 'r') sb.Append('\n');
-                else if (nx == 'u')
-                {
-                    int cp = ParseHex4(json, j + 2);
-                    if (cp >= 0) { sb.Append((char)cp); j += 4; }
-                    else sb.Append(nx);
-                }
-                else sb.Append(nx); // \" \\ \/ \b \f — trả ký tự sau backslash
-                j += 2;
-                continue;
-            }
-            if (c == '"') break;
-            sb.Append(c);
-            j++;
-        }
-        return sb.ToString();
-    }
-    static Font LoadSlot(AssetBundle ab, string json, string slot)
-    {
-        string assetName = ReadJsonString(json, slot);
-        if (string.IsNullOrEmpty(assetName)) return null;
-        Font f = ab.LoadAsset<Font>(assetName);
-        if (f == null)
-            Debug.LogWarning("[Localizer] Bundle thiếu asset '" + assetName + "' cho slot " + slot);
-        return f;
-    }
-
-    // Unity 2018.2+ rasterize dynamic font qua DirectWrite. FR_PRIVATE (0x10)
-    // chỉ hiện với GDI — DirectWrite không thấy → glyph fallback font hệ thống.
-    // Flag 0 = đăng ký session Windows (DirectWrite thấy được). Gỡ bằng
-    // RemoveFontResourceEx cùng flag ở OnDestroy / Application.quitting / ProcessExit.
-    const uint FONT_ADD_FLAGS = 0;
+    // LoadFontsFromJson/ReadJsonString/LoadSlot/EnsureFontManifest/GuessGameKey/
+    // IsValidFontFile/LoadFontsFromManifest đã chuyển sang FontLoader.cs (field
+    // dùng chung FontBd/Md/Lt/FontsReady/CustomFonts VẪN ở lại đây — vốn đã
+    // public static — FontLoader chỉ đọc/ghi qua PlagueVnMod.<field>).
 
     // FIX C-01: platform guard cho P/Invoke native.
-    static readonly bool _isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
-
-    [DllImport("gdi32.dll", CharSet = CharSet.Unicode)]
-    static extern int AddFontResourceEx(string lpszFilename, uint fl, IntPtr pdv);
-
-    [DllImport("gdi32.dll", CharSet = CharSet.Unicode)]
-    static extern bool RemoveFontResourceEx(string lpFileName, uint fl, IntPtr pdv);
-
-    // FIX C-01: wrapper có platform guard.
-    static int TryAddFontResourceEx(string path, uint flags)
-    {
-        if (!_isWindows)
-        {
-            Debug.LogWarning("[Localizer] AddFontResourceEx skip (not Windows): " + path);
-            return 0;
-        }
-        try { return AddFontResourceEx(path, flags, IntPtr.Zero); }
-        catch (Exception ex)
-        {
-            Debug.LogWarning("[Localizer] AddFontResourceEx error: " + ex.Message);
-            return 0;
-        }
-    }
-
-    static bool TryRemoveFontResourceEx(string path, uint flags)
-    {
-        if (!_isWindows) return false;
-        try { return RemoveFontResourceEx(path, flags, IntPtr.Zero); }
-        catch (Exception ex)
-        {
-            Debug.LogWarning("[Localizer] RemoveFontResourceEx error: " + ex.Message);
-            return false;
-        }
-    }
-
-    // Sau khi AddFontResourceEx thành công, Windows KHÔNG tự cập nhật bảng font nội bộ
-    // cho các subsystem khác — theo tài liệu chính thức của Microsoft, ứng dụng PHẢI tự
-    // gửi WM_FONTCHANGE broadcast thì các API tra cứu font theo tên (kể cả của Unity)
-    // mới "thấy" font vừa thêm.
-    [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-    static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam,
-        uint fuFlags, uint uTimeout, out IntPtr lpdwResult);
-
-    const int HWND_BROADCAST = 0xffff;
-    const uint WM_FONTCHANGE = 0x001D;
-    const uint SMTO_ABORTIFHUNG = 0x0002;
-
-    static void BroadcastFontChange()
-    {
-        try
-        {
-            // FIX ST-03: giảm timeout 2000ms → 250ms.
-            // FIX S-03: log audit trail.
-            Debug.Log("[Localizer] Broadcasting WM_FONTCHANGE to all windows");
-            SendMessageTimeout((IntPtr)HWND_BROADCAST, WM_FONTCHANGE,
-                IntPtr.Zero, IntPtr.Zero,
-                SMTO_ABORTIFHUNG, 250, out _);
-        }
-        catch (Exception ex)
-        {
-            Debug.LogWarning("[Localizer] BroadcastFontChange lỗi: " + ex.Message);
-        }
-    }
-
-    static List<string> PrivateFontPaths = new List<string>();
+    // Toàn bộ phần đăng ký font qua Win32 (AddFontResourceEx/RemoveFontResourceEx +
+    // broadcast WM_FONTCHANGE) đã được tách sang WindowsFontRegistrar.cs — xem file đó.
 
 
 
@@ -730,479 +546,10 @@ public class PlagueVnMod : BaseUnityPlugin
     public static string CurrentCustomLanguage = null;
     public static string CurrentScenarioId = null;
 
-    static void EnsureFontManifest(string fontDir)
-    {
-        string path = Path.Combine(fontDir, ConfigManager.ManifestFileName); // CFG-08
-        if (!Directory.Exists(fontDir)) return;
-
-        // FIX P-05: enumerate 1 lần, cache kết quả.
-        var currentFontFiles = new List<string>();
-        var currentFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var f in Directory.GetFiles(fontDir, "*.*"))
-        {
-            string ext = Path.GetExtension(f);
-            if (ext.Equals(".ttf", StringComparison.OrdinalIgnoreCase) ||
-                ext.Equals(".otf", StringComparison.OrdinalIgnoreCase))
-            {
-                currentFontFiles.Add(f);
-                currentFiles.Add(Path.GetFileName(f));
-            }
-        }
-
-        if (File.Exists(path))
-        {
-            bool stale = false;
-            try
-            {
-                var manifestFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var raw in File.ReadAllLines(path, Encoding.UTF8))
-                {
-                    string line = (raw ?? "").Trim();
-                    if (line.Length == 0 || line.StartsWith("#")) continue;
-                    int eq = line.IndexOf('=');
-                    if (eq < 0) continue;
-                    string rest = line.Substring(eq + 1).Trim();
-                    int pipe = rest.IndexOf('|');
-                    string fileName = (pipe >= 0 ? rest.Substring(0, pipe) : rest).Trim();
-                    if (!string.IsNullOrEmpty(fileName)) manifestFiles.Add(fileName);
-                }
-
-                stale = !manifestFiles.SetEquals(currentFiles);
-
-                if (!stale)
-                {
-                    DateTime manifestTime = File.GetLastWriteTimeUtc(path);
-                    foreach (var fn in currentFiles)
-                    {
-                        if (File.GetLastWriteTimeUtc(Path.Combine(fontDir, fn)) > manifestTime)
-                        {
-                            stale = true;
-                            break;
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning("[Localizer] Kiểm tra fonts.txt cũ lỗi: " + ex.Message);
-            }
-
-            if (!stale) return;
-
-            Debug.LogWarning("[Localizer] fonts.txt không khớp với file .ttf/.otf hiện tại trong "
-                + fontDir + " (đã đổi font mà chưa xoá manifest cũ) → tự tạo lại");
-            try { File.Delete(path); } catch { }
-        }
-
-        var lines = new List<string>();
-        lines.Add("# Auto-generated — sửa tay osFontName nếu Unity load sai");
-        lines.Add("# gameKey = fileName | osFontName");
-
-        // FIX P-05: dùng currentFontFiles thay vì Directory.GetFiles lần 2.
-        foreach (var fontPath in currentFontFiles)
-        {
-            string fileName = Path.GetFileName(fontPath);
-            string baseName = Path.GetFileNameWithoutExtension(fontPath);
-            string key = GuessGameKey(baseName); // Bd / Md / Lt / null
-            if (key == null) continue;
-
-            string family = TryReadFontFamily(fontPath); // name table
-            if (string.IsNullOrEmpty(family))
-                family = baseName; // fallback
-
-            lines.Add(key + " = " + fileName + " | " + family);
-        }
-
-        // FIX S-08: verify path không phải symlink + catch exception cụ thể.
-        try
-        {
-            var fi = new FileInfo(path);
-            if ((fi.Attributes & FileAttributes.ReparsePoint) != 0)
-            {
-                Debug.LogWarning("[Localizer] fonts.txt là symlink, skip write: " + path);
-                return;
-            }
-            File.WriteAllLines(path, lines.ToArray(), Encoding.UTF8);
-            Debug.Log("[Localizer] Đã auto-generate " + path);
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            Debug.LogWarning("[Localizer] Không có quyền ghi fonts.txt: " + ex.Message);
-        }
-        catch (IOException ex)
-        {
-            Debug.LogWarning("[Localizer] IO error ghi fonts.txt: " + ex.Message);
-        }
-    }
-
-    static string GuessGameKey(string baseName)
-    {
-        string n = baseName;
-        if (n.IndexOf("Bd", StringComparison.OrdinalIgnoreCase) >= 0 ||
-            n.IndexOf("_Bd", StringComparison.OrdinalIgnoreCase) >= 0 ||
-            n.IndexOf("Bold", StringComparison.OrdinalIgnoreCase) >= 0)
-            return "Bd";
-        if (n.IndexOf("Md", StringComparison.OrdinalIgnoreCase) >= 0 ||
-            n.IndexOf("_Md", StringComparison.OrdinalIgnoreCase) >= 0 ||
-            n.IndexOf("Medium", StringComparison.OrdinalIgnoreCase) >= 0)
-            return "Md";
-        if (n.IndexOf("_Lt", StringComparison.OrdinalIgnoreCase) >= 0 ||
-            n.IndexOf("-Lt", StringComparison.OrdinalIgnoreCase) >= 0 ||
-            n.IndexOf("Light", StringComparison.OrdinalIgnoreCase) >= 0)
-            return "Lt";
-        return null;
-    }
-
-    // FIX S-02: verify file là TTF/OTF hợp lệ trước khi AddFontResourceEx.
-    static bool IsValidFontFile(string path)
-    {
-        try
-        {
-            using (var fs = File.OpenRead(path))
-            {
-                byte[] header = new byte[4];
-                if (fs.Read(header, 0, 4) != 4) return false;
-                if (header[0] == 0x00 && header[1] == 0x01 &&
-                    header[2] == 0x00 && header[3] == 0x00) return true;  // TrueType
-                if (header[0] == (byte)'O' && header[1] == (byte)'T' &&
-                    header[2] == (byte)'T' && header[3] == (byte)'O') return true;  // OpenType CFF
-                if (header[0] == (byte)'t' && header[1] == (byte)'r' &&
-                    header[2] == (byte)'u' && header[3] == (byte)'e') return true;  // Apple legacy
-                return false;
-            }
-        }
-        catch { return false; }
-    }
-
-    static void LoadFontsFromManifest(string fontDir, string manifestPath)
-    {
-        string[] lines;
-        try { lines = File.ReadAllLines(manifestPath, Encoding.UTF8); }
-        catch (Exception ex)
-        {
-            Debug.LogWarning("[Localizer] Đọc fonts.txt lỗi: " + ex.Message);
-            return;
-        }
-
-        for (int li = 0; li < lines.Length; li++)
-        {
-            string line = (lines[li] ?? "").Trim();
-            if (line.Length == 0 || line.StartsWith("#")) continue;
-
-            int eq = line.IndexOf('=');
-            if (eq < 0) continue;
-
-            string gameKey = line.Substring(0, eq).Trim(); // Bd / Md / Lt
-            string rest = line.Substring(eq + 1).Trim();
-            string fileName = rest;
-            string osName = rest;
-
-            int pipe = rest.IndexOf('|');
-            if (pipe >= 0)
-            {
-                fileName = rest.Substring(0, pipe).Trim();
-                osName = rest.Substring(pipe + 1).Trim();
-            }
-
-            if (string.IsNullOrEmpty(fileName) || string.IsNullOrEmpty(osName))
-                continue;
-
-            string path = Path.Combine(fontDir, fileName);
-            if (!File.Exists(path))
-            {
-                Debug.LogWarning("[Localizer] Manifest thiếu file: " + path);
-                continue;
-            }
-
-            // FIX S-02: verify path không phải symlink và là font hợp lệ.
-            try
-            {
-                var fi = new FileInfo(path);
-                if ((fi.Attributes & FileAttributes.ReparsePoint) != 0)
-                {
-                    Debug.LogWarning("[Localizer] Skip symlink font: " + fileName);
-                    continue;
-                }
-            }
-            catch { continue; }
-
-            if (!IsValidFontFile(path))
-            {
-                Debug.LogWarning("[Localizer] Not valid TTF/OTF: " + fileName);
-                continue;
-            }
-
-            // Đăng ký đúng file này
-            try
-            {
-                int n = TryAddFontResourceEx(path, FONT_ADD_FLAGS);
-                if (n > 0)
-                {
-                    PrivateFontPaths.Add(path);
-                    BroadcastFontChange();
-                    Debug.Log("[Localizer] Private font OK: " + fileName);
-                }
-                else
-                {
-                    // FIX ST-04: AddFontResourceEx fail → skip slot.
-                    Debug.LogError("[Localizer] AddFontResourceEx FAIL cho " + fileName
-                        + " — skip slot " + gameKey);
-                    continue;
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning("[Localizer] Private font error: " + ex.Message);
-                continue;
-            }
-
-            // Hỏi đúng osName trong manifest (không đoán tên file)
-            Font font = null;
-            string used = null;
-
-            // FIX v0.28.2: removed "Be Vietnam Pro" hardcoded fallback
-            // — osName should come from fonts.txt manifest, not hardcoded.
-            string[] tryOs = { osName, osName.Replace("-", " "), Path.GetFileNameWithoutExtension(fileName) };
-            for (int t = 0; t < tryOs.Length; t++)
-            {
-                if (string.IsNullOrEmpty(tryOs[t])) continue;
-                // FIX S-05: cảnh báo khi osName khớp system font critical.
-                if (ConfigManager.CriticalSystemFonts.Contains(tryOs[t])) // CFG-08
-                    Debug.LogWarning("[Localizer] osName '" + tryOs[t]
-                        + "' là system font critical — mod sẽ override UI gốc");
-                try
-                {
-                    Font f = Font.CreateDynamicFontFromOSFont(tryOs[t], 16);
-                    if (f != null) { font = f; used = tryOs[t]; break; }
-                }
-                catch { }
-            }
-
-            if (font == null)
-            {
-                Debug.LogWarning("[Localizer] Manifest không tạo Font: key=" + gameKey
-                    + " file=" + fileName + " os='" + osName + "'");
-                continue;
-            }
-
-            font.RequestCharactersInTexture("ABCĐĂÂÊÔƠƯMNmn", 24, FontStyle.Normal);
-            Texture tex = font.material != null ? font.material.mainTexture : null;
-            Debug.Log("[Localizer] FONT TEX " + used
-                + " tex=" + (tex != null ? tex.width + "x" + tex.height + " id=" + tex.GetInstanceID() : "NULL"));
-
-            // Map Bd/Md/Lt → key game quen thuộc
-            string fullKey = gameKey;
-            if (gameKey.Equals("Bd", StringComparison.OrdinalIgnoreCase)) FontBd = font;
-            else if (gameKey.Equals("Md", StringComparison.OrdinalIgnoreCase)) FontMd = font;
-            else if (gameKey.Equals("Lt", StringComparison.OrdinalIgnoreCase)) FontLt = font;
-
-            CustomFonts[fullKey] = font;
-            CustomFonts[NormalizeFontName(fullKey)] = font;
-            CustomFonts[NormalizeFontName(osName)] = font;
-            CustomFonts[NormalizeFontName(used)] = font;
-            if (font.fontNames != null)
-            {
-                for (int i = 0; i < font.fontNames.Length; i++)
-                    CustomFonts[NormalizeFontName(font.fontNames[i])] = font;
-            }
-
-            // FIX v0.28.2: Removed hardcoded font aliases (HelveticaNeueLTStd_*).
-            // Font mapping should come entirely from fonts.txt manifest — data-driven.
-
-            string faces = font.fontNames != null ? string.Join("|", font.fontNames) : "?";
-            Debug.Log("[Localizer] Manifest OK " + gameKey
-                + " file=" + fileName
-                + " → OS '" + used + "'"
-                + " id=" + font.GetInstanceID()
-                + " fontNames=[" + faces + "]");
-        }
-    }
-    /// <summary>
-    /// Đọc family name từ bảng 'name' trong TTF/OTF (không cần OS).
-    /// Ưu tiên Windows platform (3), nameID 1 = Family, 4 = Full.
-    /// </summary>
-    static string TryReadFontFamily(string fontPath)
-    {
-        try
-        {
-            // FIX S-06: skip file > 50MB — TTF/OTF hợp lệ hiếm khi > 10MB.
-            var fi = new FileInfo(fontPath);
-            if (fi.Length > 50L * 1024 * 1024)
-            {
-                Debug.LogWarning("[Localizer] Font quá lớn, skip: " + fontPath);
-                return null;
-            }
-            byte[] data = File.ReadAllBytes(fontPath);
-            if (data.Length < 12) return null;
-
-            // TTC không hỗ trợ ở đây
-            if (data[0] == (byte)'t' && data[1] == (byte)'t' && data[2] == (byte)'c' && data[3] == (byte)'f')
-                return null;
-
-            ushort numTables = ReadU16BE(data, 4);
-            int offset = 12;
-            int nameOff = -1;
-            int nameLen = 0;
-
-            for (int i = 0; i < numTables; i++)
-            {
-                if (offset + 16 > data.Length) break;
-                string tag = Encoding.ASCII.GetString(data, offset, 4);
-                // skip checkSum
-                int off = ReadU32BE(data, offset + 8);
-                int len = ReadU32BE(data, offset + 12);
-                if (tag == "name")
-                {
-                    nameOff = off;
-                    nameLen = len;
-                    break;
-                }
-                offset += 16;
-            }
-
-            // FIX LANG-07: guard tràn số nguyên khi font hỏng/hostile khai offset
-            // hoặc length lớn (nameOff + nameLen có thể wrap thành số âm lọt check).
-            if (nameOff < 0 || nameLen < 0 || nameOff > data.Length - nameLen) return null;
-
-            int baseOff = nameOff;
-            ushort format = ReadU16BE(data, baseOff);
-            ushort count = ReadU16BE(data, baseOff + 2);
-            ushort stringOffset = ReadU16BE(data, baseOff + 4);
-
-            string family = null;
-            string full = null;
-            string postscript = null;
-
-            for (int i = 0; i < count; i++)
-            {
-                // FIX LANG-07: guard biên an toàn tràn số nguyên cho từng record.
-                int rec = baseOff + 6 + i * 12;
-                if (rec < 0 || rec > data.Length - 12) break;
-
-                ushort platformID = ReadU16BE(data, rec);
-                ushort nameID = ReadU16BE(data, rec + 6);
-                ushort length = ReadU16BE(data, rec + 8);
-                ushort so = ReadU16BE(data, rec + 10);
-
-                int strPos = baseOff + stringOffset + so;
-                if (strPos < 0 || strPos > data.Length - length) continue;
-
-                string s;
-                // FIX LANG-07: trước đây Encoding.GetEncoding(1252) nằm TRỰC TIẾP trong
-                // vòng lặp — trên runtime thiếu codepage nó ném NotSupportedException và
-                // exception này văng ra ngoài, làm MẤT family name của mọi record sau
-                // (kể cả record Windows UTF-16 hoàn toàn hợp lệ). Giờ mỗi record được
-                // try/catch riêng + có fallback decode khi không lấy được codepage 1252.
-                try
-                {
-                    if (platformID == 3) // Windows: UTF-16 BE
-                    {
-                        s = Encoding.BigEndianUnicode.GetString(data, strPos, length);
-                    }
-                    else if (platformID == 1) // Mac: often Roman
-                    {
-                        Encoding mac = GetMacRomanEncodingOnce();
-                        s = mac != null
-                            ? mac.GetString(data, strPos, length)
-                            : DecodeBytesLatinish(data, strPos, length);
-                    }
-                    else
-                        continue;
-                }
-                catch
-                {
-                    // record này hỏng — bỏ qua, không làm hỏng cả bảng name.
-                    continue;
-                }
-
-                s = (s ?? "").Trim();
-                if (s.Length == 0) continue;
-
-                if (nameID == 1) family = s;      // Font Family
-                else if (nameID == 4) full = s;   // Full name
-                else if (nameID == 6) postscript = s;
-            }
-
-            if (!string.IsNullOrEmpty(family)) return family;
-            if (!string.IsNullOrEmpty(full)) return full;
-            if (!string.IsNullOrEmpty(postscript)) return postscript;
-            return null;
-        }
-        catch (Exception ex)
-        {
-            Debug.LogWarning("[Localizer] TryReadFontFamily: " + ex.Message);
-            return null;
-        }
-    }
-
-    static Encoding _macRomanEncoding;
-    static bool _macRomanTried;
-
-    /// <summary>
-    /// Lấy codepage 1252 đúng 1 lần (cache). Trả null nếu runtime không có
-    /// codepage này — caller dùng DecodeBytesLatinish làm fallback.
-    /// </summary>
-    static Encoding GetMacRomanEncodingOnce()
-    {
-        if (_macRomanTried) return _macRomanEncoding;
-        _macRomanTried = true;
-        try { _macRomanEncoding = Encoding.GetEncoding(1252); }
-        catch { _macRomanEncoding = null; }
-        return _macRomanEncoding;
-    }
-
-    /// <summary>
-    /// Fallback decode Mac-Roman-ish: byte → char (ánh xạ Latin-1). Đủ đúng cho
-    /// family name font (gần như ASCII) khi codepage 1252 không khả dụng.
-    /// </summary>
-    static string DecodeBytesLatinish(byte[] data, int pos, int len)
-    {
-        var sb = new StringBuilder(len);
-        for (int i = 0; i < len; i++) sb.Append((char)data[pos + i]);
-        return sb.ToString();
-    }
-
-    /// <summary>
-    /// FIX LANG-07 (hoàn tất mục audit C-06 từng defer): cố gắng đăng ký
-    /// CodePagesEncodingProvider qua reflection nếu assembly
-    /// System.Text.Encoding.CodePages có mặt trên máy — cho phép
-    /// Encoding.GetEncoding(1252) hoạt động trên runtime mặc định thiếu codepage.
-    /// Không có assembly đó → no-op an toàn (không thêm reference build mới).
-    /// </summary>
-    public static void TryRegisterCodePages()
-    {
-        try
-        {
-            // FIX LANG-17: Type.GetType thay cho AccessTools.TypeByName — TypeByName
-            // log Warning HarmonyX ("Could not find type") mỗi lần khởi động trên
-            // mọi máy không có assembly System.Text.Encoding.CodePages (mặc định
-            // của Unity Mono runtime — log thật 0.31.0 cho thấy vậy). Type.GetType
-            // trả null im lặng — hành vi giữ nguyên (no-op an toàn), log sạch.
-            var t = Type.GetType("System.Text.CodePagesEncodingProvider, System.Text.Encoding.CodePages");
-            if (t == null)
-                t = Type.GetType("System.Text.CodePagesEncodingProvider");
-            if (t == null) return;
-            var prop = t.GetProperty("Instance",
-                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-            var reg = typeof(Encoding).GetMethod("RegisterProvider");
-            if (prop == null || reg == null) return;
-            object provider = prop.GetValue(null, null);
-            if (provider == null) return;
-            reg.Invoke(null, new object[] { provider });
-            Debug.Log("[Localizer] CodePagesEncodingProvider đã đăng ký — codepage 1252 khả dụng.");
-        }
-        catch { }
-    }
-
-    static ushort ReadU16BE(byte[] d, int i)
-    {
-        return (ushort)((d[i] << 8) | d[i + 1]);
-    }
-
-    static int ReadU32BE(byte[] d, int i)
-    {
-        return (d[i] << 24) | (d[i + 1] << 16) | (d[i + 2] << 8) | d[i + 3];
-    }
+    // ===================== TTF/OTF NAME TABLE =====================
+    // TryReadFontFamily, ReadU16BE/ReadU32BE, GetMacRomanEncodingOnce,
+    // DecodeBytesLatinish, TryRegisterCodePages đã chuyển sang FontFamilyReader.cs
+    // (nhóm không đụng state dùng chung — tách an toàn, xem file đó).
     public static string LocalizeHardcodedUi(string s)
     {
         if (string.IsNullOrEmpty(s)) return s;
@@ -1822,7 +1169,7 @@ public class PlagueVnMod : BaseUnityPlugin
 
         try { CustomFonts.Clear(); } catch { }
 
-        try { UnregisterPrivateFonts(); }
+        try { WindowsFontRegistrar.UnregisterPrivateFonts(); }
         catch (Exception ex) { Debug.LogWarning("[Localizer] UnregisterPrivateFonts: " + ex.Message); }
 
         try { LangImageVault.Unload(); }
@@ -2343,7 +1690,7 @@ public class PlagueVnMod : BaseUnityPlugin
             }
 
             // FIX LANG-07: đăng ký codepage provider (nếu có) trước khi load font.
-            TryRegisterCodePages();
+            FontFamilyReader.TryRegisterCodePages();
         }
         catch (Exception ex)
         {
@@ -2376,7 +1723,7 @@ public class PlagueVnMod : BaseUnityPlugin
         Application.quitting += OnAppQuitting;
         AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
         // FIX C-01: log warning rõ ràng nếu non-Windows.
-        if (!_isWindows)
+        if (!WindowsFontRegistrar.IsWindows)
         {
             Logger.LogWarning("PlagueLib: không phải Windows, font custom sẽ KHÔNG hoạt động. "
                 + "Image replacement vẫn hoạt động bình thường.");
@@ -2386,7 +1733,7 @@ public class PlagueVnMod : BaseUnityPlugin
 
     static void OnAppQuitting()
     {
-        UnregisterPrivateFonts();
+        WindowsFontRegistrar.UnregisterPrivateFonts();
     }
 
     static void OnProcessExit(object sender, EventArgs e)
@@ -2394,7 +1741,7 @@ public class PlagueVnMod : BaseUnityPlugin
         // FIX ST-05: wrap try/catch.
         try
         {
-            UnregisterPrivateFonts();
+            WindowsFontRegistrar.UnregisterPrivateFonts();
         }
         catch (Exception ex)
         {
@@ -2420,7 +1767,7 @@ public class PlagueVnMod : BaseUnityPlugin
         catch { }
         Application.quitting -= OnAppQuitting;
         AppDomain.CurrentDomain.ProcessExit -= OnProcessExit;
-        UnregisterPrivateFonts();
+        WindowsFontRegistrar.UnregisterPrivateFonts();
         Instance = null;
         // FIX ST-01: chỉ gọi DestroyAll() — nó đã tự gọi Unload() bên trong.
         LangImageVault.DestroyAll();
@@ -2457,8 +1804,10 @@ public class PlagueVnMod : BaseUnityPlugin
         try
         {
             EnglishToCustomDict.Clear();
-            var field = typeof(CLocalisationManager).GetField(
-                "mpLocalisedTexts", BindingFlags.NonPublic | BindingFlags.Static);
+            // FIX PERF-01: dùng lại _fiMpLocalisedTexts đã cache (dòng ~300) thay vì
+            // GetField lại — cùng field, cùng Type/flags, FieldInfo trả về tương đương,
+            // chỉ bớt 1 lần tra cứu reflection mỗi lần hàm này chạy.
+            var field = _fiMpLocalisedTexts;
             if (field == null) return;
             var all = field.GetValue(null) as Dictionary<string, Dictionary<string, string>>;
             if (all == null) return;
@@ -2608,8 +1957,8 @@ public class PlagueVnMod : BaseUnityPlugin
     {
         try
         {
-            var field = typeof(CLocalisationManager).GetField(
-                "mpLocalisedTexts", BindingFlags.NonPublic | BindingFlags.Static);
+            // FIX PERF-01: dùng lại _fiMpLocalisedTexts đã cache thay vì GetField lại.
+            var field = _fiMpLocalisedTexts;
             if (field == null) { Logger.LogError("Không tìm thấy mpLocalisedTexts"); return; }
 
             var mpLocalisedTexts = field.GetValue(null) as Dictionary<string, Dictionary<string, string>>;
@@ -2778,7 +2127,7 @@ public class PlagueVnMod : BaseUnityPlugin
             // FIX LANG-02: đối chiếu placeholder {N} của bản dịch với English gốc
             // TRƯỚC khi build reverse lookup — entry dùng index vượt English sẽ bị
             // loại để tránh FormatException (crash game) khi game string.Format.
-            ValidatePlaceholdersAgainstEnglish();
+            TranslationFileLoader.ValidatePlaceholdersAgainstEnglish();
 
             // FIX v2.9: Build reverse lookup English → Vietnamese
             BuildEnglishToCustomDict();
@@ -3670,46 +3019,12 @@ public class PlagueVnMod : BaseUnityPlugin
     }
 
     // ===================== FONT CORE =====================
-
-    static void RegisterPrivateFonts(string fontDir)
-    {
-        // CFG-08: có thể tắt AddFontResourceEx qua config ([Fonts] RegisterPrivateFonts).
-        if (!ConfigManager.RegisterPrivateFonts) return;
-        if (!Directory.Exists(fontDir)) return;
-        foreach (var path in Directory.GetFiles(fontDir, "*.*"))
-        {
-            if (!path.EndsWith(".ttf", StringComparison.OrdinalIgnoreCase) &&
-                !path.EndsWith(".otf", StringComparison.OrdinalIgnoreCase))
-                continue;
-            try
-            {
-                int n = TryAddFontResourceEx(path, FONT_ADD_FLAGS);
-                if (n > 0)
-                {
-                    PrivateFontPaths.Add(path);
-                    BroadcastFontChange();
-                    Debug.Log("[Localizer] Private font OK: " + Path.GetFileName(path));
-                }
-                else
-                    Debug.LogWarning("[Localizer] Private font FAIL: " + Path.GetFileName(path));
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning("[Localizer] Private font error: " + ex.Message);
-            }
-        }
-    }
-
-    public static void UnregisterPrivateFonts()
-    {
-        if (PrivateFontPaths.Count == 0) return;
-        foreach (var path in PrivateFontPaths)
-        {
-            try { TryRemoveFontResourceEx(path, FONT_ADD_FLAGS); } catch { }
-        }
-        PrivateFontPaths.Clear();
-        BroadcastFontChange();
-    }
+    // Toàn bộ phần đăng ký/hủy đăng ký font qua Win32 đã chuyển sang
+    // WindowsFontRegistrar.cs. Đã xóa khỏi đây: hàm RegisterPrivateFonts(string
+    // fontDir) cũ ở vị trí này — grep toàn repo xác nhận KHÔNG nơi nào gọi tới nó
+    // (dead code); việc đăng ký font thật sự nằm trong LoadSlot() ở trên, dùng
+    // WindowsFontRegistrar trực tiếp. Nếu bạn thấy hàm này từng được dùng ở đâu đó
+    // ngoài repo (ví dụ nhánh khác), nói mình biết để khôi phục lại.
 
     // FIX (rò rỉ bộ nhớ tiềm ẩn): trước đây có 2 hàm huỷ font gần giống nhau
     // (DestroyLoadedFonts không nơi nào gọi, DestroyCustomFonts thì được dùng nhưng
@@ -3782,8 +3097,8 @@ public class PlagueVnMod : BaseUnityPlugin
         EnglishTextDict.Clear();
         try
         {
-            var field = typeof(CLocalisationManager).GetField(
-                "mpLocalisedTexts", BindingFlags.NonPublic | BindingFlags.Static);
+            // FIX PERF-01: dùng lại _fiMpLocalisedTexts đã cache thay vì GetField lại.
+            var field = _fiMpLocalisedTexts;
             var all = field != null
                 ? field.GetValue(null) as Dictionary<string, Dictionary<string, string>>
                 : null;
@@ -3849,7 +3164,7 @@ public class PlagueVnMod : BaseUnityPlugin
                 }
                 CustomFonts.Clear();
                 FontBd = null; FontMd = null; FontLt = null;
-                UnregisterPrivateFonts();
+                WindowsFontRegistrar.UnregisterPrivateFonts();
                 return;
             }
 
@@ -3863,19 +3178,19 @@ public class PlagueVnMod : BaseUnityPlugin
             }
             CustomFonts.Clear();
             FontBd = null; FontMd = null; FontLt = null;
-            UnregisterPrivateFonts();
+            WindowsFontRegistrar.UnregisterPrivateFonts();
 
             // FIX MN-08: ensure manifest trước khi load.
-            EnsureFontManifest(fontDir);
+            FontLoader.EnsureFontManifest(fontDir);
 
             if (File.Exists(Path.Combine(fontDir, ConfigManager.JsonConfigFileName)))
-                LoadFontsFromJson(fontDir);
+                FontLoader.LoadFontsFromJson(fontDir);
 
             if (!FontsReady)
             {
                 string manifestPath = Path.Combine(fontDir, ConfigManager.ManifestFileName);
                 if (File.Exists(manifestPath))
-                    LoadFontsFromManifest(fontDir, manifestPath);
+                    FontLoader.LoadFontsFromManifest(fontDir, manifestPath);
             }
 
             FontsReady = FontBd != null || FontMd != null || FontLt != null || CustomFonts.Count > 0;
@@ -4106,7 +3421,7 @@ public class PlagueVnMod : BaseUnityPlugin
             return;
         }
 
-        var dict = LoadTranslationFileStatic(scenarioFile);
+        var dict = TranslationFileLoader.LoadTranslationFileStatic(scenarioFile);
         if (dict.Count == 0) return;
 
         foreach (var kv in dict)
@@ -4145,20 +3460,6 @@ public class PlagueVnMod : BaseUnityPlugin
         CurrentScenarioId = null;
     }
 
-    // FIX ST-08: cache dict theo path + LastWriteTime.
-    // CFG-11 (thread-safety): _fileCache đọc/ghi dưới lock — hiện toàn bộ load
-    // chạy trên main thread (Invoke/coroutine/Harmony postfix), lock rẻ và an
-    // toàn nếu sau này có đường load/reload từ thread khác.
-    static readonly object _fileCacheLock = new object();
-    static readonly Dictionary<string, (DateTime mtime, Dictionary<string, string> dict)> _fileCache
-        = new Dictionary<string, (DateTime, Dictionary<string, string>)>(StringComparer.OrdinalIgnoreCase);
-
-    // FIX S-07: static compiled Regex với timeout 5s tránh ReDoS.
-    static readonly Regex _translationRegex = new Regex(
-        @"""((?:[^""\\]|\\.)*)""\s*=\s*""((?:[^""\\]|\\.)*)""\s*;?",
-        RegexOptions.Singleline,
-        TimeSpan.FromSeconds(5));
-
     // ===================== PLACEHOLDER / FORMAT VALIDATION =====================
     // (FIX LANG-01/LANG-02) Bộ kiểm tra tính toàn vẹn placeholder của bản dịch.
     // Game dùng string.Format(GetText(...), args) cho rất nhiều chuỗi (kịch bản,
@@ -4167,50 +3468,12 @@ public class PlagueVnMod : BaseUnityPlugin
     // (game không try/catch ở đó) → crash toàn game. Mọi entry đều được kiểm tra
     // tại thời điểm load file dịch — entry nguy hiểm bị BỎ (fallback English an
     // toàn) và cảnh báo rõ file + số dòng để tác giả sửa.
-
-    // 64 arg "mồi" — đủ cho mọi chuỗi thực tế. string.Format ném FormatException
-    // khi brace hỏng cú pháp (lone '{'/'}}', '{0' không đóng) hoặc index >= 64.
-    static readonly object[] _formatProbeArgs = BuildFormatProbeArgs();
-
-    static object[] BuildFormatProbeArgs()
-    {
-        var a = new object[64];
-        for (int i = 0; i < a.Length; i++) a[i] = null;
-        return a;
-    }
-
-    /// <summary>
-    /// true nếu chuỗi đi qua string.Format mà KHÔNG ném FormatException bất kể
-    /// số arg (chỉ phụ thuộc cú pháp brace). Dry-run với 64 arg mồi.
-    /// </summary>
-    static bool IsFormatSyntaxSafe(string s)
-    {
-        if (string.IsNullOrEmpty(s)) return true;
-        if (s.IndexOf('{') < 0 && s.IndexOf('}') < 0) return true;
-        try
-        {
-            string.Format(System.Globalization.CultureInfo.InvariantCulture, s, _formatProbeArgs);
-            return true;
-        }
-        catch (FormatException) { return false; }
-    }
-
-    static readonly Regex _fmtIndexRegex = new Regex(@"\{\s*(\d+)",
-        RegexOptions.Compiled, TimeSpan.FromSeconds(2));
-
-    /// <summary>Index số cao nhất trong các placeholder {N}; -1 nếu không có.</summary>
-    static int MaxFormatIndex(string s)
-    {
-        if (string.IsNullOrEmpty(s)) return -1;
-        int max = -1;
-        MatchCollection ms = _fmtIndexRegex.Matches(s);
-        for (int i = 0; i < ms.Count; i++)
-        {
-            int v;
-            if (int.TryParse(ms[i].Groups[1].Value, out v) && v > max) max = v;
-        }
-        return max;
-    }
+    //
+    // _fileCache(Lock)/_translationRegex/_formatProbeArgs/BuildFormatProbeArgs/
+    // IsFormatSyntaxSafe/_fmtIndexRegex/MaxFormatIndex đã chuyển sang
+    // TranslationFileLoader.cs (nhóm không đụng TranslationDict/EnglishTextDict —
+    // tách an toàn). ValidatePlaceholdersAgainstEnglish bên dưới vẫn ở lại Main.cs
+    // vì nó đọc/ghi 2 dict đó, vốn bị PlagueVnMod dùng ở 28-33 chỗ khác.
 
     /// <summary>
     /// FIX LANG-02: đối chiếu placeholder của MỌI ngôn ngữ custom với English gốc
@@ -4222,363 +3485,22 @@ public class PlagueVnMod : BaseUnityPlugin
     /// Đồng thời cảnh báo (không loại) khi: bản dịch bỏ mất placeholder gốc,
     /// lệch số lượng %s/%d (printf-style), thiếu [TOKEN] hoa kiểu [NAME].
     /// </summary>
-    static int ValidatePlaceholdersAgainstEnglish()
-    {
-        try
-        {
-            var field = typeof(CLocalisationManager).GetField(
-                "mpLocalisedTexts", BindingFlags.NonPublic | BindingFlags.Static);
-            if (field == null) return 0;
-            var all = field.GetValue(null) as Dictionary<string, Dictionary<string, string>>;
-            if (all == null) return 0;
+    // ValidatePlaceholdersAgainstEnglish/CountPrintfTokens/_bracketTokenRegex/
+    // FindMissingBracketToken đã chuyển sang TranslationFileLoader.cs (field dùng
+    // chung TranslationDict/EnglishTextDict VẪN ở lại đây — vốn đã public static —
+    // TranslationFileLoader chỉ đọc/ghi qua PlagueVnMod.<field>).
 
-            Dictionary<string, string> engDict = null;
-            foreach (var kv in all)
-            {
-                if (kv.Key.Equals(ConfigManager.ReferenceLanguage, StringComparison.OrdinalIgnoreCase))
-                {
-                    engDict = kv.Value;
-                    break;
-                }
-            }
-            if (engDict == null || engDict.Count == 0) return 0;
-
-            int removed = 0;
-            int warnings = 0;
-            foreach (var langKv in all)
-            {
-                if (langKv.Key.Equals(ConfigManager.ReferenceLanguage, StringComparison.OrdinalIgnoreCase)) continue; // CFG-08
-                var d = langKv.Value;
-                if (d == null || d.Count == 0) continue;
-
-                List<string> toRemove = null;
-                foreach (var kv in d)
-                {
-                    string v = kv.Value;
-                    if (string.IsNullOrEmpty(v)) continue;
-
-                    string engV;
-                    if (!engDict.TryGetValue(kv.Key, out engV) || engV == null)
-                        continue; // key không có trong English — game không Format → giữ
-
-                    int vMax = MaxFormatIndex(v);
-                    int eMax = MaxFormatIndex(engV);
-
-                    // Nguy cơ crash: index vượt quá English gốc → loại.
-                    if (vMax > eMax)
-                    {
-                        if (toRemove == null) toRemove = new List<string>();
-                        toRemove.Add(kv.Key);
-                        continue;
-                    }
-
-                    if (warnings >= 20) continue; // giới hạn log tránh ngập console
-
-                    // Cảnh báo (không loại): bản dịch bỏ mất placeholder gốc.
-                    if (eMax >= 0 && vMax < 0)
-                    {
-                        Debug.LogWarning("[Localizer] [" + langKv.Key + "] key \"" + Trunc(kv.Key, 60)
-                            + "\": English có placeholder {0.." + eMax + "} nhưng bản dịch không có"
-                            + " — thông tin format sẽ thiếu khi hiển thị.");
-                        warnings++;
-                        continue;
-                    }
-
-                    // Cảnh báo: lệch số lượng %s/%d (printf-style) giữa 2 bản.
-                    int engPf = CountPrintfTokens(engV);
-                    if (engPf != CountPrintfTokens(v))
-                    {
-                        Debug.LogWarning("[Localizer] [" + langKv.Key + "] key \"" + Trunc(kv.Key, 60)
-                            + "\": lệch số lượng %s/%d giữa English (" + engPf
-                            + ") và bản dịch (" + CountPrintfTokens(v) + ").");
-                        warnings++;
-                        continue;
-                    }
-
-                    // Cảnh báo: thiếu [TOKEN] hoa (game Replace tay kiểu [NAME]).
-                    string missingTok = FindMissingBracketToken(engV, v);
-                    if (missingTok != null)
-                    {
-                        Debug.LogWarning("[Localizer] [" + langKv.Key + "] key \"" + Trunc(kv.Key, 60)
-                            + "\": bản dịch thiếu token [" + missingTok + "] mà English có.");
-                        warnings++;
-                    }
-                }
-
-                if (toRemove != null)
-                {
-                    for (int i = 0; i < toRemove.Count; i++)
-                    {
-                        string k = toRemove[i];
-                        Debug.LogWarning("[Localizer] [" + langKv.Key + "] LOẠI entry \""
-                            + Trunc(k, 60) + "\": bản dịch dùng placeholder vượt English gốc"
-                            + " → tránh FormatException (crash game). Hãy sửa file dịch.");
-                        d.Remove(k);
-                        TranslationDict.Remove(k);
-                        EnglishTextDict.Remove(k);
-                        removed++;
-                    }
-                }
-            }
-            if (warnings >= 20)
-                Debug.LogWarning("[Localizer] Placeholder validation: đã đạt giới hạn 20 cảnh báo — các cảnh báo còn lại bị im lặng.");
-            if (removed > 0)
-                Debug.LogWarning("[Localizer] Placeholder validation: đã loại " + removed
-                    + " entry nguy cơ crash — xem các cảnh báo [Localizer] phía trên để sửa file dịch.");
-            return removed;
-        }
-        catch (Exception ex)
-        {
-            Debug.LogWarning("[Localizer] ValidatePlaceholdersAgainstEnglish lỗi: " + ex.Message);
-            return 0;
-        }
-    }
-
-    static int CountPrintfTokens(string s)
-    {
-        if (string.IsNullOrEmpty(s)) return 0;
-        int n = 0;
-        for (int i = 0; i < s.Length; i++)
-        {
-            if (s[i] == '%' && i + 1 < s.Length)
-            {
-                char nx = s[i + 1];
-                if (nx == 's' || nx == 'd' || nx == 'f') n++;
-                else if (nx == '%') i++; // %% literal — không tính
-            }
-        }
-        return n;
-    }
-
-    static readonly Regex _bracketTokenRegex = new Regex(@"\[[A-Z][A-Z0-9_]{1,}\]",
-        RegexOptions.Compiled, TimeSpan.FromSeconds(2));
-
-    /// <summary>Tìm token [UPPER_CASE] có trong English mà bản dịch thiếu; null nếu không.</summary>
-    static string FindMissingBracketToken(string eng, string custom)
-    {
-        if (string.IsNullOrEmpty(eng)) return null;
-        foreach (Match m in _bracketTokenRegex.Matches(eng))
-        {
-            if (custom == null || custom.IndexOf(m.Value, StringComparison.OrdinalIgnoreCase) < 0)
-                return m.Value;
-        }
-        return null;
-    }
-
-    static string Trunc(string s, int max)
+    internal static string Trunc(string s, int max)
     {
         if (string.IsNullOrEmpty(s) || s.Length <= max) return s;
         return s.Substring(0, max) + "...";
     }
 
-    /// <summary>FIX LANG-05: Replace chuỗi KHÔNG phân biệt hoa thường.</summary>
-    static string ReplaceIgnoreCase(string s, string needle, string replacement)
-    {
-        if (string.IsNullOrEmpty(s) || string.IsNullOrEmpty(needle)) return s;
-        int idx = s.IndexOf(needle, StringComparison.OrdinalIgnoreCase);
-        if (idx < 0) return s;
-        var sb = new StringBuilder(s.Length + replacement.Length);
-        int pos = 0;
-        while (idx >= 0)
-        {
-            sb.Append(s, pos, idx - pos);
-            sb.Append(replacement);
-            pos = idx + needle.Length;
-            idx = pos < s.Length ? s.IndexOf(needle, pos, StringComparison.OrdinalIgnoreCase) : -1;
-        }
-        sb.Append(s, pos, s.Length - pos);
-        return sb.ToString();
-    }
-
-    static Dictionary<string, string> LoadTranslationFileStatic(string path)
-    {
-        // FIX v2.13: log timing để tối ưu hiệu năng
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        DateTime mtime;
-        try { mtime = File.GetLastWriteTimeUtc(path); }
-        catch { mtime = DateTime.MinValue; }
-
-        lock (_fileCacheLock)
-        {
-            if (_fileCache.TryGetValue(path, out var entry) && entry.mtime == mtime)
-                return new Dictionary<string, string>(entry.dict, StringComparer.OrdinalIgnoreCase);
-        }
-
-        var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        // FIX LANG-06/LANG-11: thống kê chất lượng file để cảnh báo tác giả.
-        int skippedBad = 0, dupKeys = 0, emptyValues = 0;
-        int lineNo = 1, lineCursor = 0;
-        try
-        {
-            // Encoding: File.ReadAllText tự nhận diện BOM (UTF-8, UTF-16 LE/BE) và
-            // strip BOM — file dịch lưu từ Notepad/VS/Sublime đều đọc đúng, BOM
-            // không bao giờ lọt vào key đầu tiên (LANG-10: đã verify, an toàn).
-            string content = File.ReadAllText(path);
-            foreach (Match match in _translationRegex.Matches(content))
-            {
-                if (match.Groups.Count < 3) continue;
-
-                // FIX LANG-06: tính số dòng tăng tiến (O(n) cho cả file) để mọi
-                // cảnh báo đều kèm vị trí chính xác cho tác giả file dịch.
-                while (lineCursor <= match.Index)
-                {
-                    int nl = content.IndexOf('\n', lineCursor);
-                    if (nl < 0 || nl > match.Index) break;
-                    lineCursor = nl + 1;
-                    lineNo++;
-                }
-
-                string key = Unescape(match.Groups[1].Value.Trim());
-                string value = Unescape(match.Groups[2].Value);
-                if (string.IsNullOrEmpty(key)) continue;
-
-                // FIX LANG-01: value chứa brace '{'/'}' hỏng cú pháp composite-format
-                // (thiếu '}', '{0' không đóng, brace đơn...) — game string.Format
-                // chuỗi này sẽ ném FormatException (không try/catch phía game) →
-                // crash toàn game. Bỏ entry (fallback English an toàn) + cảnh báo.
-                if (value.IndexOf('{') >= 0 || value.IndexOf('}') >= 0)
-                {
-                    if (!IsFormatSyntaxSafe(value))
-                    {
-                        Debug.LogWarning("[Localizer] " + Path.GetFileName(path) + ":" + lineNo
-                            + " — bỏ qua entry brace hỏng (gây FormatException nếu game format): key=\""
-                            + Trunc(key, 60) + "\"");
-                        skippedBad++;
-                        continue;
-                    }
-                    // FIX LANG-02 (nửa in-parse): file scenario có key = chuỗi
-                    // English gốc (key chứa sẵn {N}) — so sánh index cao nhất của
-                    // value với của key, vượt là bỏ (FormatException chắc chắn).
-                    int vMax = MaxFormatIndex(value);
-                    int kMax = MaxFormatIndex(key);
-                    if (kMax >= 0 && vMax > kMax)
-                    {
-                        Debug.LogWarning("[Localizer] " + Path.GetFileName(path) + ":" + lineNo
-                            + " — bỏ qua entry dùng {" + vMax + "} vượt chuỗi gốc (tối đa {" + kMax
-                            + "}) — nguy cơ FormatException: key=\"" + Trunc(key, 60) + "\"");
-                        skippedBad++;
-                        continue;
-                    }
-                }
-
-                // Placeholder substitution — {VERSION} thay bằng version hiện tại.
-                // Cho phép file .txt viết "Plague Inc Language Library {VERSION}" thay vì hardcode.
-                // FIX LANG-05: trước đây detect KHÔNG phân biệt hoa thường nhưng
-                // string.Replace thì CÓ — "{version}"/"{Version}" được phát hiện
-                // mà KHÔNG được thay → hiện nguyên literal trong game. Giờ thay
-                // theo OrdinalIgnoreCase.
-                value = ReplaceIgnoreCase(value, "{VERSION}", PluginVersion.DisplayVersion);
-
-                // FIX LANG-06: cảnh báo key trùng (kể cả khác hoa/thường — dict là
-                // OrdinalIgnoreCase nên "Key" và "key" đè lên nhau im lặng trước đây).
-                if (dict.ContainsKey(key)) dupKeys++;
-                // FIX LANG-11: đếm value rỗng — gần như chắc chắn là lỗi thiếu string.
-                // FIX OPT-05: value rỗng KHÔNG được nạp vào dict. Game (GetTextFromDictionary)
-                // gặp value rỗng sẽ trả lại CHÍNH KEY (với success=true) và BỎ QUA English
-                // fallback → label hiện key thô (đúng hiện tượng "FE_Options_*" trong video).
-                // Bỏ entry rỗng → game tự rơi xuống English fallback của nó.
-                if (value.Length == 0) { emptyValues++; continue; }
-                dict[key] = value;
-                // FIX ST-07: bỏ ToLower — dict đã OrdinalIgnoreCase.
-            }
-            lock (_fileCacheLock) { _fileCache[path] = (mtime, dict); }
-            sw.Stop();
-            if (sw.ElapsedMilliseconds > 100)
-                Debug.Log("[v2.13] Parse " + Path.GetFileName(path) + ": " + dict.Count + " entries in " + sw.ElapsedMilliseconds + "ms");
-            if (skippedBad > 0 || dupKeys > 0 || emptyValues > 0)
-                Debug.LogWarning("[Localizer] " + Path.GetFileName(path) + ": " + dict.Count
-                    + " entries — " + skippedBad + " bị bỏ (placeholder/brace lỗi), "
-                    + dupKeys + " key trùng (đè nhau), " + emptyValues + " value rỗng");
-        }
-        catch (Exception ex)
-        {
-            // Exception khi đọc/parse (file bị khoá, regex timeout...) — dict trả
-            // phần đã parse được, KHÔNG cache để lần sau đọc lại (m behaviour cũ).
-            Debug.LogError("Lỗi đọc/parse file: " + ex.GetType().Name + ": " + ex.Message);
-        }
-        return dict;
-    }
-
+    // ReplaceIgnoreCase/LoadTranslationFileStatic/Unescape/ParseHex4/HexVal đã
+    // chuyển sang TranslationFileLoader.cs.
     Dictionary<string, string> LoadTranslationFile(string path)
     {
-        return LoadTranslationFileStatic(path);
-    }
-
-    // FIX CR-05: viết lại single-pass. Trước đây Replace nối tiếp theo thứ tự
-    // \n, \t, \", \\, \r — xử lý "\\" (backslash literal) SAU "\n" khiến chuỗi
-    // "\\n" trong file dịch bị tách sai thành "\" + newline thay vì "\" + "n"
-    // đúng. Single-pass xử lý đúng mọi tổ hợp escape.
-    //
-    // FIX LANG-03: giá trị multi-line (regex Singleline cho phép newline literal
-    // nằm trong cặp "") mang theo \r\n của file Windows — NGUI UILabel chỉ hiểu
-    // \n; \r sẽ hiển thị thành ký tự lỗi (□) trên từng dòng sau dòng đầu. Giờ mọi
-    // \r\n và \r đơn đều được chuẩn hoá thành \n; escape \r cũng trả về \n (chọn
-    // phía an toàn cho render NGUI).
-    //
-    // FIX LANG-04: hỗ trợ escape \uXXXX (JSON-style; surrogate pair cần 2 escape
-    // liên tiếp — 2 char surrogate ghép tự nhiên trong StringBuilder). Công cụ
-    // xuất file dịch thường sinh escape này cho ký tự Unicode — trước đây nó
-    // hiển thị nguyên literal "\u1ea3" trong game.
-    static string Unescape(string s)
-    {
-        if (string.IsNullOrEmpty(s)) return s;
-        if (s.IndexOf('\\') < 0 && s.IndexOf('\r') < 0) return s;
-        var sb = new StringBuilder(s.Length);
-        for (int i = 0; i < s.Length; i++)
-        {
-            char c = s[i];
-            if (c == '\\' && i + 1 < s.Length)
-            {
-                char nxt = s[i + 1];
-                if (nxt == 'n') { sb.Append('\n'); i++; }
-                else if (nxt == 't') { sb.Append('\t'); i++; }
-                else if (nxt == 'r') { sb.Append('\n'); i++; }
-                else if (nxt == '"') { sb.Append('"'); i++; }
-                else if (nxt == '\\') { sb.Append('\\'); i++; }
-                else if (nxt == 'u')
-                {
-                    int cp = ParseHex4(s, i + 2);
-                    if (cp >= 0)
-                    {
-                        sb.Append((char)cp);
-                        i += 5; // bỏ qua 4 hex digit (vòng for cộng thêm 1 nữa)
-                    }
-                    else sb.Append(c); // \u hỏng (thiếu hex) — giữ nguyên backslash
-                }
-                else sb.Append(c); // backslash đứng trước ký tự lạ — giữ nguyên
-            }
-            else if (c == '\r')
-            {
-                // LANG-03: CRLF → LF; CR đơn → LF (NGUI chỉ render \n).
-                sb.Append('\n');
-                if (i + 1 < s.Length && s[i + 1] == '\n') i++;
-            }
-            else
-                sb.Append(c);
-        }
-        return sb.ToString();
-    }
-
-    /// <summary>Đọc 4 hex digit tại s[start..start+3]; -1 nếu không hợp lệ.</summary>
-    static int ParseHex4(string s, int start)
-    {
-        if (s == null || start < 0 || start + 4 > s.Length) return -1;
-        int v = 0;
-        for (int k = 0; k < 4; k++)
-        {
-            int h = HexVal(s[start + k]);
-            if (h < 0) return -1;
-            v = (v << 4) | h;
-        }
-        return v;
-    }
-
-    static int HexVal(char c)
-    {
-        if (c >= '0' && c <= '9') return c - '0';
-        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-        return -1;
+        return TranslationFileLoader.LoadTranslationFileStatic(path);
     }
 
     public static bool IsCustomLanguageActive()
