@@ -4,6 +4,54 @@ Bản ghi nhận các thay đổi giữa phiên bản.
 
 ---
 
+## [Build 9 — 2026-10-03] Tách Main.cs thành 5 file + fix build netstandard/HintPath (0.29.6.0)
+
+Phiên tái cấu trúc + fix build, **không đổi hành vi runtime nào** — mọi hàm được move
+nguyên văn, đã verify bằng diff từng hàm so với bản gốc (xem lịch sử trò chuyện/PR để
+đối chiếu nếu cần). Không có mã `XXX-NN` riêng cho phiên này vì không phải fix bug
+hành vi mà là cấu trúc lại code + sửa cấu hình build.
+
+### Tái cấu trúc (Main.cs 5186 → 4106 dòng)
+Tách 4 file mới, mỗi file giữ nguyên logic/chữ ký hàm, chỉ đổi nơi chứa:
+- **`WindowsFontRegistrar.cs`** — đăng ký font qua Win32
+  (`AddFontResourceEx`/`RemoveFontResourceEx` + broadcast `WM_FONTCHANGE`).
+- **`FontFamilyReader.cs`** — đọc family name từ bảng `name` của file TTF/OTF.
+- **`TranslationFileLoader.cs`** — parse/cache file dịch `.txt`, validate placeholder
+  `{N}` chống `FormatException` (gồm cả `ValidatePlaceholdersAgainstEnglish`).
+- **`FontLoader.cs`** — load font từ AssetBundle (`fonts.json`) hoặc `.ttf`/`.otf`
+  trực tiếp theo manifest (`fonts.txt`, tự sinh nếu thiếu).
+
+Field dùng chung (`FontBd`/`Md`/`Lt`, `FontsReady`, `CustomFonts`, `TranslationDict`,
+`EnglishTextDict`) **giữ nguyên trên `PlagueVnMod`** (vốn đã `public static`) — các
+file mới chỉ đọc/ghi qua `PlagueVnMod.<field>`, không move state.
+
+- Xoá dead code: `RegisterPrivateFonts(string fontDir)` — grep toàn repo xác nhận
+  không nơi nào gọi tới; đăng ký font thật sự nằm trong `LoadSlot`/`LoadFontsFromManifest`.
+- **FIX PERF-01**: `BuildEnglishToCustomDict`/`LoadAllLanguages`/1 hàm build dict ngôn
+  ngữ tự `GetField("mpLocalisedTexts", ...)` riêng bằng reflection thay vì dùng field
+  đã cache sẵn (`_fiMpLocalisedTexts`) — gộp lại dùng chung, bớt vài lần tra cứu
+  reflection mỗi khi đổi ngôn ngữ/boot.
+
+### Fix build (chỉ `.csproj`, không đụng code C#)
+- **FIX BUILD-01**: 9 dòng `<HintPath>` trong `.csproj` hardcode cứng đường dẫn tương
+  đối riêng của máy tác giả gốc (`..\..\..\..\..\plagueinc\...`,
+  `..\..\..\..\..\steam\...`), mâu thuẫn với chính comment trong file nói là lấy từ
+  `Directory.Build.props`. Trên máy khác, dù `Directory.Build.props.user` đã đúng và
+  `CheckDevPaths` không báo lỗi, build vẫn ra 213 lỗi `CS0246` vì `HintPath` chưa từng
+  thực sự dùng `$(BepInExDir)`/`$(GameManagedDir)`. Sửa cả 9 dòng dùng đúng 2 biến đó.
+- **FIX BUILD-02**: `TargetFramework` `netstandard2.0` → `netstandard2.1` — DLL thật
+  của game (`Assembly-CSharp`, `UnityEngine.CoreModule`, `UnityEngine.AssetBundleModule`,
+  `UnityEngine.TextRenderingModule`) build nhắm netstandard 2.1, gây `CS1705` khi
+  project nhắm 2.0 (thấp hơn những gì assembly tham chiếu yêu cầu).
+
+> **Lưu ý khoảng trống lịch sử**: Changelog này nhảy từ Build 5 thẳng lên Build 9.
+> Build 6/7/8 có tồn tại thật (nội dung còn lưu trong doc-comment của `Version.cs`,
+> ví dụ LANG-32 ở Build 7 và OPT-01..07 ở Build 8) nhưng chưa từng được chép vào
+> Changelog này — repo chỉ có 1 commit git duy nhất nên không khôi phục lại được
+> mốc thời gian chính xác của Build 6/7/8 để viết đầy đủ ở đây.
+
+---
+
 ## [Build 5 — 2026-08-31] Zero-Hardcode + ConfigManager + fix dropdown về ngôn ngữ gốc (0.29.5-build5)
 
 Vòng fix thứ 5 theo yêu cầu: **sửa dứt điểm lỗi dropdown ngôn ngữ bị trống khi

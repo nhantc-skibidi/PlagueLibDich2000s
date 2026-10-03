@@ -1,7 +1,15 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>netstandard2.0</TargetFramework>
+    <!--
+      FIX BUILD-02: DLL thật của game (Assembly-CSharp, UnityEngine.CoreModule,
+      UnityEngine.AssetBundleModule, UnityEngine.TextRenderingModule...) được build
+      nhắm netstandard 2.1 (Unity phiên bản game đang dùng hỗ trợ profile này) —
+      target netstandard2.0 cũ của project thấp hơn, gây CS1705 "has a higher
+      version than referenced assembly netstandard". Nâng lên 2.1 để khớp đúng
+      những gì các DLL tham chiếu thật sự yêu cầu.
+    -->
+    <TargetFramework>netstandard2.1</TargetFramework>
     <AssemblyName>PlagueLibDich2000s</AssemblyName>
     <RootNamespace>PlagueLibDich2000s</RootNamespace>
     <LangVersion>latest</LangVersion>
@@ -21,61 +29,50 @@
     <Error Condition="'$(GameManagedDir)' == ''" Text="GameManagedDir chưa được cấu hình. Xem SETUP.md ở gốc repo — tạo file Directory.Build.props.user hoặc set biến môi trường GameManagedDir." />
   </Target>
 
+  <!--
+    FIX BUILD-01: các HintPath dưới đây TRƯỚC ĐÂY bị hardcode cứng đường dẫn tương đối
+    riêng của máy tác giả gốc (vd "..\..\..\..\..\plagueinc\Plague.Inc.Evolved...",
+    "..\..\..\..\..\steam\steamapps\..."), mâu thuẫn với chính comment phía trên nói
+    là lấy từ Directory.Build.props — nên trên MÁY KHÁC, dù Directory.Build.props.user
+    đã đúng và được nạp (CheckDevPaths không báo lỗi vì $(BepInExDir)/$(GameManagedDir)
+    có giá trị), HintPath vẫn trỏ sai chỗ vì chưa từng thực sự dùng 2 biến đó. Giờ mọi
+    HintPath dùng $(BepInExDir)/$(GameManagedDir) thật sự — đúng như thiết kế ban đầu.
+  -->
   <ItemGroup>
     <Reference Include="0Harmony">
-      <HintPath>..\..\..\..\..\plagueinc\Plague.Inc.Evolved.v1.24.0.3.ALL.DLC\BepInEx\core\0Harmony.dll</HintPath>
+      <HintPath>$(BepInExDir)\core\0Harmony.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="Assembly-CSharp">
-      <HintPath>..\..\..\..\..\plagueinc\Plague.Inc.Evolved.v1.24.0.3.ALL.DLC\PlagueIncEvolved_Data\Managed\Assembly-CSharp.dll</HintPath>
+      <HintPath>$(GameManagedDir)\Assembly-CSharp.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="BepInEx">
-      <HintPath>..\..\..\..\..\steam\steamapps\common\PlagueInc\BepInEx\core\BepInEx.dll</HintPath>
+      <HintPath>$(BepInExDir)\core\BepInEx.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="UnityEngine">
-      <HintPath>..\..\..\..\..\steam\steamapps\common\PlagueInc\PlagueIncEvolved_Data\Managed\UnityEngine.dll</HintPath>
+      <HintPath>$(GameManagedDir)\UnityEngine.dll</HintPath>
       <Private>False</Private>
     </Reference>
-
-
-
-
     <Reference Include="UnityEngine.AIModule">
-      <HintPath>..\..\..\..\..\steam\steamapps\common\PlagueInc\PlagueIncEvolved_Data\Managed\UnityEngine.AIModule.dll</HintPath>
+      <HintPath>$(GameManagedDir)\UnityEngine.AIModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
-
-
-
-
     <Reference Include="UnityEngine.AssetBundleModule">
-      <HintPath>..\..\..\..\..\plagueinc\Plague.Inc.Evolved.v1.24.0.3.ALL.DLC\PlagueIncEvolved_Data\Managed\UnityEngine.AssetBundleModule.dll</HintPath>
+      <HintPath>$(GameManagedDir)\UnityEngine.AssetBundleModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
-
-
-
-
     <Reference Include="UnityEngine.CoreModule">
-      <HintPath>..\..\..\..\..\plagueinc\Plague.Inc.Evolved.v1.24.0.3.ALL.DLC\PlagueIncEvolved_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
+      <HintPath>$(GameManagedDir)\UnityEngine.CoreModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
-
-
-
-
     <Reference Include="UnityEngine.ImageConversionModule">
-      <HintPath>..\..\..\..\..\plagueinc\Plague.Inc.Evolved.v1.24.0.3.ALL.DLC\PlagueIncEvolved_Data\Managed\UnityEngine.ImageConversionModule.dll</HintPath>
+      <HintPath>$(GameManagedDir)\UnityEngine.ImageConversionModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
-
-
-
-
     <Reference Include="UnityEngine.TextRenderingModule">
-      <HintPath>..\..\..\..\..\plagueinc\Plague.Inc.Evolved.v1.24.0.3.ALL.DLC\PlagueIncEvolved_Data\Managed\UnityEngine.TextRenderingModule.dll</HintPath>
+      <HintPath>$(GameManagedDir)\UnityEngine.TextRenderingModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
   </ItemGroup>
