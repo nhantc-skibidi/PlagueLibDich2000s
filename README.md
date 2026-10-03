@@ -39,14 +39,7 @@ Want to add another language? See [CREATE_LANGUAGE.md](CREATE_LANGUAGE.md).
 ## Changelog
 See [CHANGELOG.md](CHANGELOG.md) - VI only.
 
-## License
-See [LICENSE.txt](LICENSE.txt).
-
-
-
 ---
-
-
 
 # PlagueLib-Dich2000s (VI)
 
@@ -88,6 +81,3 @@ Muốn có thêm ngôn ngữ khác? Xem [CREATE_LANGUAGE_vi.md](CREATE_LANGUAGE_
 
 ## Nhật ký thay đổi
 Xem [CHANGELOG.md](CHANGELOG.md).
-
-## Giấy phép
-Xem [LICENSE.txt](LICENSE.txt) - chỉ có EN.
