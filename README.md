@@ -39,14 +39,7 @@ Want to add another language? See [CREATE_LANGUAGE.md](CREATE_LANGUAGE.md).
 ## Changelog
 See [CHANGELOG.md](CHANGELOG.md) - VI only.
 
-## License
-See [LICENSE.txt](LICENSE.txt).
-
-
-
 ---
-
-
 
 # PlagueLib-Dich2000s (VI)
 
@@ -78,7 +71,7 @@ Xóa mod trong `[thư mục Plague Inc]/BepInEx/plugins`. Và game sẽ trở v�
 ## Chuẩn đoán & khắc phục sự cố
 - **Game chạy nhưng mod không tải:** Kiểm tra BepInEx đã được cài đặt cùng thư mục với game có file `.exe`, và xem trong `BepInEx/LogOutput.log` để tìm lỗi.
 - **Không thấy ngôn ngữ tùy chỉnh:** Hãy chắc chắn rằng mod đã nằm bên trong thư mục `BepInEx/plugins`, chứ không phải là các thư mục lồng nhau khác.
-- **Vẫn không biết làm sao?** Báo cáo [vấn đề](https://github.com/nhantc-skibidi/PlagueLibDich2000s/issues) và tải kèm tệp `LogOutput.log`.
+- **Vẫn không biết làm sao?** Báo cáo [vấn đề](https://github.com/nhantc-skibidi/PlagueLibDich2000s/issues) và tải lên kèm tệp `LogOutput.log`.
 
 ## Tạo ngôn ngữ riêng
 Muốn có thêm ngôn ngữ khác? Xem [CREATE_LANGUAGE_vi.md](CREATE_LANGUAGE_vi.md).
@@ -88,6 +81,3 @@ Muốn có thêm ngôn ngữ khác? Xem [CREATE_LANGUAGE_vi.md](CREATE_LANGUAGE_
 
 ## Nhật ký thay đổi
 Xem [CHANGELOG.md](CHANGELOG.md).
-
-## Giấy phép
-Xem [LICENSE.txt](LICENSE.txt) - chỉ có EN.

@@ -8,7 +8,7 @@
 
 - Đã cài **BepInEx** cho Plague Inc: Evolved (BepInEx 5.x, bản dành cho game Mono).
   Nếu chưa cài BepInEx, làm bước này trước — mod này chỉ chạy được khi có BepInEx.
-- Đã tải file **`PlagueLibDich2000s.dll`** (bản build sẵn, do team Dịch 2000s phát hành).
+- Đã tải file **`PlagueLibDich2000s.dll`**.
 
 ## Các bước cài
 
