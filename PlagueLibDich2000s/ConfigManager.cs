@@ -541,9 +541,14 @@ public static class ConfigManager
     /// <summary>Nội dung fallback mặc định của màn About (giữ nguyên nội dung cũ, kèm version hiện tại).</summary>
     static string BuildAboutDefaultDescription()
     {
-        return "Plague Inc Language Library v" + PluginVersion.DisplayVersion + "\n\n" +
+        // FIX LANG-46: giữ "{VERSION}" literal (KHÔNG bake PluginVersion.DisplayVersion ở
+        // đây) — giá trị này bị BepInEx _cfg.Bind() LƯU VĨNH VIỄN vào file .cfg ngay lần
+        // chạy đầu. Nếu bake version thật vào đây, mọi bản build sau (version mới) vẫn đọc
+        // lại đúng version CŨ đã lưu trong .cfg — version không bao giờ cập nhật. Thay thế
+        // "{VERSION}" được làm lúc hiển thị (CMainAboutModSubScreen.GetLoc), giống file dịch.
+        return "Plague Inc Language Library v{VERSION}\n\n" +
         "Created by Dich 2000s Team with A.I Support\n\n" +
-        "Include: Grok 4.6, Claude Sonnet 4.6 & 5, Gemini NotebookLLM, GLM 5.2\n\n" +
+        "Include: Grok, Claude Sonnet, Gemini NotebookLLM, GLM\n\n" +
         "About Team:\n Đi Ẻ Game Chơi(@fifaifaccau) (Youtube)\n Nhựa Inox (@nhuainox) (Youtube)\n Megapixel (@megapixel-real) (Youtube)\n\n" +
         "This is the first mod of our team, and we dont know how to code C#, ummm, yeah, that's all, thanks for download our mod! (I'm bad at English)\n\n" +
         "A BepInEx localisation pack: Localization Mod.\n\n" +

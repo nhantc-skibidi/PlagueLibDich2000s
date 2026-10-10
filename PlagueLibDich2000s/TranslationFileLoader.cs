@@ -87,8 +87,10 @@ public static class TranslationFileLoader
         return max;
     }
 
-    /// <summary>FIX LANG-05: Replace chuỗi KHÔNG phân biệt hoa thường.</summary>
-    static string ReplaceIgnoreCase(string s, string needle, string replacement)
+    /// <summary>FIX LANG-05: Replace chuỗi KHÔNG phân biệt hoa thường.
+    /// internal (không chỉ private) — FIX LANG-46 dùng lại ở AboutModScreen.GetLoc
+    /// để thay "{VERSION}" trong fallback đọc từ BepInEx config (không bake sẵn).</summary>
+    internal static string ReplaceIgnoreCase(string s, string needle, string replacement)
     {
         if (string.IsNullOrEmpty(s) || string.IsNullOrEmpty(needle)) return s;
         int idx = s.IndexOf(needle, StringComparison.OrdinalIgnoreCase);

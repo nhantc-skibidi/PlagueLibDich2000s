@@ -36,7 +36,7 @@ public class CMainAboutModSubScreen : CMainSubScreen
         if (PlagueVnMod.TryGetTranslation(key, out string t) &&
             !string.IsNullOrEmpty(t) &&
             !t.Equals(key, StringComparison.OrdinalIgnoreCase))
-            return t;
+            return t; // đã substitute {VERSION} lúc load file dịch (TranslationFileLoader)
         try
         {
             string g = CLocalisationManager.GetText(key);
@@ -45,8 +45,13 @@ public class CMainAboutModSubScreen : CMainSubScreen
                 return g;
         }
         catch { }
-        if (key == KeyTitle) return DefaultTitle;
-        if (key == KeyDesc) return DefaultDesc;
+        // FIX LANG-46: fallback đọc từ BepInEx config (đã lưu vĩnh viễn trên đĩa từ lần
+        // chạy đầu) — vẫn có thể mang literal "{VERSION}" nếu config cũ hơn fix này, hoặc
+        // người dùng tự ghi "{VERSION}" khi sửa config tay. Thay ở đây thay vì bake sẵn.
+        if (key == KeyTitle)
+            return TranslationFileLoader.ReplaceIgnoreCase(DefaultTitle, "{VERSION}", PluginVersion.DisplayVersion);
+        if (key == KeyDesc)
+            return TranslationFileLoader.ReplaceIgnoreCase(DefaultDesc, "{VERSION}", PluginVersion.DisplayVersion);
         return key;
     }
 
