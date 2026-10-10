@@ -4,7 +4,7 @@ Bản ghi nhận các thay đổi giữa phiên bản.
 
 ---
 
-## [Build 9 — 2026-10-03] Tách Main.cs thành 5 file + fix build netstandard/HintPath (0.29.6.0)
+## [Build 9 — 2026-10-03] Tách Main.cs thành 5 file + fix build netstandard/HintPath (1.0.1)
 
 Phiên tái cấu trúc + fix build, **không đổi hành vi runtime nào** — mọi hàm được move
 nguyên văn, đã verify bằng diff từng hàm so với bản gốc (xem lịch sử trò chuyện/PR để

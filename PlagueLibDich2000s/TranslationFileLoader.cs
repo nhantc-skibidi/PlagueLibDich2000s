@@ -148,6 +148,12 @@ public static class TranslationFileLoader
                 string value = Unescape(match.Groups[2].Value);
                 if (string.IsNullOrEmpty(key)) continue;
 
+                // FIX LANG-45: thay {VERSION} TRƯỚC khi kiểm tra an toàn brace bên dưới.
+                // Trước đây thay SAU — "{VERSION}" còn nguyên lúc string.Format() dry-run
+                // (IsFormatSyntaxSafe) ném FormatException (không phải placeholder số) →
+                // entry bị loại oan (fallback English cứng), dù bản dịch hoàn toàn hợp lệ.
+                value = ReplaceIgnoreCase(value, "{VERSION}", PluginVersion.DisplayVersion);
+
                 // FIX LANG-01: value chứa brace '{'/'}' hỏng cú pháp composite-format
                 // (thiếu '}', '{0' không đóng, brace đơn...) — game string.Format
                 // chuỗi này sẽ ném FormatException (không try/catch phía game) →
@@ -176,14 +182,6 @@ public static class TranslationFileLoader
                         continue;
                     }
                 }
-
-                // Placeholder substitution — {VERSION} thay bằng version hiện tại.
-                // Cho phép file .txt viết "Plague Inc Language Library {VERSION}" thay vì hardcode.
-                // FIX LANG-05: trước đây detect KHÔNG phân biệt hoa thường nhưng
-                // string.Replace thì CÓ — "{version}"/"{Version}" được phát hiện
-                // mà KHÔNG được thay → hiện nguyên literal trong game. Giờ thay
-                // theo OrdinalIgnoreCase.
-                value = ReplaceIgnoreCase(value, "{VERSION}", PluginVersion.DisplayVersion);
 
                 // FIX LANG-06: cảnh báo key trùng (kể cả khác hoa/thường — dict là
                 // OrdinalIgnoreCase nên "Key" và "key" đè lên nhau im lặng trước đây).
@@ -445,4 +443,3 @@ public static class TranslationFileLoader
         return null;
     }
 }
-
