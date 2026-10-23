@@ -42,7 +42,8 @@ public class CMainAboutModSubScreen : CMainSubScreen
             string g = CLocalisationManager.GetText(key);
             if (!string.IsNullOrEmpty(g) &&
                 !g.Equals(key, StringComparison.OrdinalIgnoreCase))
-                return g;
+                // shortcut: chỉ thay {VERSION} ở nhánh này; các nhánh khác đã thay sẵn, dùng lại helper này nếu thêm nhánh mới
+                return TranslationFileLoader.ReplaceIgnoreCase(g, "{VERSION}", PluginVersion.DisplayVersion);
         }
         catch { }
         // FIX LANG-46: fallback đọc từ BepInEx config (đã lưu vĩnh viễn trên đĩa từ lần
