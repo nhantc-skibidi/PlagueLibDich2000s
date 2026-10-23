@@ -548,7 +548,7 @@ public static class ConfigManager
         // "{VERSION}" được làm lúc hiển thị (CMainAboutModSubScreen.GetLoc), giống file dịch.
         return "Plague Inc Language Library v{VERSION}\n\n" +
         "Created by Dich 2000s Team with A.I Support\n\n" +
-        "Include: Grok, Claude Sonnet, Gemini NotebookLLM, GLM\n\n" +
+        "Include: Grok 4.6, Claude Sonnet 4.6 & 5, Gemini NotebookLLM, GLM 5.2\n\n" +
         "About Team:\n Đi Ẻ Game Chơi(@fifaifaccau) (Youtube)\n Nhựa Inox (@nhuainox) (Youtube)\n Megapixel (@megapixel-real) (Youtube)\n\n" +
         "This is the first mod of our team, and we dont know how to code C#, ummm, yeah, that's all, thanks for download our mod! (I'm bad at English)\n\n" +
         "A BepInEx localisation pack: Localization Mod.\n\n" +
